@@ -16,8 +16,19 @@ Gemini API 서비스 - 블로그 콘텐츠 생성
 """
 
 import time
+import re
 from typing import Optional, List, Callable
 from dataclasses import dataclass
+from enum import Enum
+
+
+class GeminiErrorType(Enum):
+    """Gemini API 에러 종류"""
+    API_KEY_INVALID = "api_key_invalid"
+    QUOTA_EXCEEDED = "quota_exceeded"
+    MODEL_NOT_FOUND = "model_not_found"
+    NETWORK_ERROR = "network_error"
+    UNKNOWN = "unknown"
 
 
 @dataclass
@@ -30,29 +41,27 @@ class BlogContent:
 
 
 class GeminiService:
-    """Google Gemini API 래퍼"""
+    """Google Gemini API 래퍼 (동적 모델 선택 지원)"""
 
     # Rate limiting 설정
     RATE_LIMIT_DELAY = 4  # 요청 간 최소 대기 시간 (초)
-    MAX_RETRIES = 3
 
     def __init__(
         self,
         api_key: str,
-        model_name: str = "gemini-2.0-flash",
         logger: Optional[Callable] = None
     ):
         """
         Args:
             api_key: Gemini API 키
-            model_name: 사용할 모델명
             logger: 로그 출력 함수
         """
         self.api_key = api_key
-        self.model_name = model_name
         self.logger = logger or print
-        self._model = None
+        self._genai = None
         self._last_request_time = 0
+        self._working_model = None  # 성공한 모델 저장
+        self._available_models = []  # 사용 가능한 모델 목록
 
         self._init_client()
 
@@ -62,8 +71,11 @@ class GeminiService:
             import google.generativeai as genai
 
             genai.configure(api_key=self.api_key)
-            self._model = genai.GenerativeModel(self.model_name)
+            self._genai = genai
             self.logger("Gemini API 클라이언트 초기화 완료")
+
+            # 사용 가능한 모델 목록 조회
+            self._fetch_available_models()
 
         except ImportError:
             raise GeminiServiceError(
@@ -73,6 +85,38 @@ class GeminiService:
         except Exception as e:
             raise GeminiServiceError(f"Gemini 초기화 실패: {e}")
 
+    def _fetch_available_models(self):
+        """사용 가능한 모델 목록 조회"""
+        try:
+            self.logger("사용 가능한 모델 조회 중...")
+            models = self._genai.list_models()
+
+            # generateContent를 지원하는 모델만 필터링
+            self._available_models = []
+            for model in models:
+                if 'generateContent' in model.supported_generation_methods:
+                    model_name = model.name
+                    self._available_models.append(model_name)
+
+            if self._available_models:
+                self.logger(f"사용 가능한 모델 {len(self._available_models)}개 발견")
+                # 처음 3개만 로그에 표시
+                for m in self._available_models[:3]:
+                    self.logger(f"  - {m}")
+                if len(self._available_models) > 3:
+                    self.logger(f"  ... 외 {len(self._available_models) - 3}개")
+            else:
+                self.logger("사용 가능한 모델이 없습니다.")
+
+        except Exception as e:
+            self.logger(f"모델 목록 조회 실패: {e}")
+            # 실패 시 기본 모델 목록 사용
+            self._available_models = [
+                "models/gemini-1.5-flash",
+                "models/gemini-1.5-pro",
+                "models/gemini-pro",
+            ]
+
     def _rate_limit(self):
         """Rate limiting 적용"""
         elapsed = time.time() - self._last_request_time
@@ -80,28 +124,139 @@ class GeminiService:
             time.sleep(self.RATE_LIMIT_DELAY - elapsed)
         self._last_request_time = time.time()
 
-    def _generate(self, prompt: str, retry: int = 0) -> str:
+    def _extract_retry_seconds(self, error_msg: str) -> Optional[int]:
+        """에러 메시지에서 재시도 대기 시간 추출"""
+        # "retry in X seconds" 또는 "Retry after X seconds" 패턴 찾기
+        patterns = [
+            r'retry\s+(?:in|after)\s+(\d+)\s*(?:seconds?|s)',
+            r'(\d+)\s*(?:seconds?|s)\s+(?:until|before)',
+            r'wait\s+(\d+)\s*(?:seconds?|s)',
+            r'try again in (\d+)',
+        ]
+
+        error_lower = error_msg.lower()
+        for pattern in patterns:
+            match = re.search(pattern, error_lower)
+            if match:
+                return int(match.group(1))
+
+        return None
+
+    def _is_quota_error(self, error: Exception) -> bool:
+        """할당량 초과 에러인지 확인"""
+        error_msg = str(error).lower()
+        quota_keywords = ['429', 'quota', 'rate limit', 'resource exhausted', 'too many requests']
+        return any(keyword in error_msg for keyword in quota_keywords)
+
+    def _call_api(self, model_name: str, prompt: str, retry_count: int = 0) -> str:
+        """특정 모델로 API 호출 (429 에러 시 자동 재시도)"""
+        max_retries = 3
+
+        try:
+            model = self._genai.GenerativeModel(model_name)
+            response = model.generate_content(prompt)
+            return response.text
+
+        except Exception as e:
+            error_msg = str(e)
+
+            # 429 할당량 초과 에러 처리
+            if self._is_quota_error(e) and retry_count < max_retries:
+                # 에러 메시지에서 대기 시간 추출
+                wait_seconds = self._extract_retry_seconds(error_msg)
+
+                if wait_seconds is None:
+                    # 기본 대기 시간 (지수 백오프)
+                    wait_seconds = min(30 * (2 ** retry_count), 120)
+
+                self.logger(f"할당량 초과! {wait_seconds}초 후 재시도합니다... ({retry_count + 1}/{max_retries})")
+
+                # 대기 중 카운트다운 표시
+                for remaining in range(wait_seconds, 0, -10):
+                    if remaining > 10:
+                        self.logger(f"  대기 중... {remaining}초 남음")
+                    time.sleep(min(10, remaining))
+
+                # 재시도
+                return self._call_api(model_name, prompt, retry_count + 1)
+
+            # 다른 에러는 그대로 raise
+            raise
+
+    def _generate(self, prompt: str) -> str:
         """
-        텍스트 생성 (재시도 로직 포함)
+        텍스트 생성 (동적 모델 선택)
 
         Args:
             prompt: 프롬프트
-            retry: 현재 재시도 횟수
 
         Returns:
             생성된 텍스트
         """
-        try:
-            self._rate_limit()
-            response = self._model.generate_content(prompt)
-            return response.text
+        self._rate_limit()
 
-        except Exception as e:
-            if retry < self.MAX_RETRIES:
-                self.logger(f"Gemini API 오류, 재시도 중... ({retry + 1}/{self.MAX_RETRIES})")
-                time.sleep(2 ** retry)  # 지수 백오프
-                return self._generate(prompt, retry + 1)
-            raise GeminiServiceError(f"텍스트 생성 실패: {e}")
+        # 이전에 성공한 모델이 있으면 그것부터 시도
+        if self._working_model:
+            try:
+                result = self._call_api(self._working_model, prompt)
+                return result
+            except Exception as e:
+                self.logger(f"기존 모델 {self._working_model} 실패, 다른 모델 시도...")
+                self._working_model = None
+
+        # 사용 가능한 모델 목록이 없으면 다시 조회
+        if not self._available_models:
+            self._fetch_available_models()
+
+        # 모델 우선순위 정의 (flash 모델 우선)
+        priority_keywords = ['flash', 'pro']
+
+        # 우선순위에 따라 모델 정렬
+        def model_priority(model_name):
+            name_lower = model_name.lower()
+            for i, keyword in enumerate(priority_keywords):
+                if keyword in name_lower:
+                    # flash가 있으면 우선순위 높게
+                    if 'flash' in name_lower:
+                        return (0, model_name)
+                    return (i + 1, model_name)
+            return (99, model_name)
+
+        sorted_models = sorted(self._available_models, key=model_priority)
+
+        # 모든 모델 순차적으로 시도
+        last_error = None
+        quota_errors = []  # 할당량 초과된 모델 추적
+
+        for model in sorted_models:
+            try:
+                self.logger(f"모델 시도 중: {model}")
+                result = self._call_api(model, prompt)
+                self._working_model = model
+                self.logger(f"모델 {model} 사용 성공!")
+                return result
+            except Exception as e:
+                error_msg = str(e)[:100]
+
+                # 429 에러인 경우 (이미 _call_api에서 재시도 했음)
+                if self._is_quota_error(e):
+                    self.logger(f"모델 {model} 할당량 초과")
+                    quota_errors.append(model)
+                else:
+                    self.logger(f"모델 {model} 실패: {error_msg}")
+
+                last_error = e
+                time.sleep(1)
+                continue
+
+        # 모든 모델이 할당량 초과인 경우 특별 메시지
+        if len(quota_errors) == len(sorted_models):
+            raise GeminiServiceError(
+                "모든 모델의 API 할당량이 초과되었습니다. "
+                "잠시 후 다시 시도하거나, API 할당량을 확인해주세요."
+            )
+
+        raise GeminiServiceError(f"모든 Gemini 모델 시도 실패. 마지막 오류: {last_error}")
 
     def generate_blog_post(
         self,
@@ -311,10 +466,73 @@ Output only the prompt, nothing else."""
         except Exception:
             return False
 
+    def get_working_model(self) -> Optional[str]:
+        """현재 사용 중인 모델명 반환"""
+        return self._working_model
+
+    def get_available_models(self) -> List[str]:
+        """사용 가능한 모델 목록 반환"""
+        return self._available_models.copy()
+
 
 class GeminiServiceError(Exception):
     """Gemini 서비스 예외"""
-    pass
+
+    def __init__(self, message: str, error_type: GeminiErrorType = GeminiErrorType.UNKNOWN, retry_seconds: int = 0):
+        super().__init__(message)
+        self.error_type = error_type
+        self.retry_seconds = retry_seconds
+
+    @classmethod
+    def from_exception(cls, error: Exception) -> 'GeminiServiceError':
+        """일반 예외에서 GeminiServiceError 생성"""
+        error_msg = str(error).lower()
+        original_msg = str(error)
+
+        # API 키 무효
+        if any(keyword in error_msg for keyword in [
+            'api_key_invalid', 'invalid api key', 'api key not valid',
+            'permission denied'
+        ]) or ('api' in error_msg and 'key' in error_msg and ('invalid' in error_msg or 'expired' in error_msg)):
+            return cls(original_msg, GeminiErrorType.API_KEY_INVALID, 0)
+
+        # 할당량 초과
+        if any(keyword in error_msg for keyword in [
+            '429', 'quota', 'rate limit', 'resource exhausted', 'too many requests'
+        ]):
+            # retry 시간 추출
+            retry_seconds = 0
+            patterns = [
+                r'retry\s+(?:in|after)\s+(\d+)\s*(?:seconds?|s)',
+                r'(\d+)\s*(?:seconds?|s)\s+(?:until|before)',
+                r'wait\s+(\d+)\s*(?:seconds?|s)',
+                r'try again in (\d+)',
+            ]
+            for pattern in patterns:
+                match = re.search(pattern, error_msg)
+                if match:
+                    retry_seconds = int(match.group(1))
+                    break
+
+            if retry_seconds == 0:
+                retry_seconds = 60  # 기본 1분
+
+            return cls(original_msg, GeminiErrorType.QUOTA_EXCEEDED, retry_seconds)
+
+        # 모델 없음
+        if any(keyword in error_msg for keyword in [
+            '404', 'not found', 'model not found', 'does not exist'
+        ]):
+            return cls(original_msg, GeminiErrorType.MODEL_NOT_FOUND, 0)
+
+        # 네트워크 에러
+        if any(keyword in error_msg for keyword in [
+            'connection', 'timeout', 'network', 'unreachable'
+        ]):
+            return cls(original_msg, GeminiErrorType.NETWORK_ERROR, 0)
+
+        # 기타
+        return cls(original_msg, GeminiErrorType.UNKNOWN, 0)
 
 
 # 독립 실행 테스트
@@ -343,10 +561,15 @@ if __name__ == "__main__":
     try:
         service = GeminiService(api_key=api_key)
 
+        print("\n사용 가능한 모델 목록:")
+        for model in service.get_available_models():
+            print(f"  - {model}")
+
         # 1. 연결 테스트
-        print("1. API 연결 테스트")
+        print("\n1. API 연결 테스트")
         connected = service.test_connection()
-        print(f"   결과: {'성공' if connected else '실패'}\n")
+        print(f"   결과: {'성공' if connected else '실패'}")
+        print(f"   사용 모델: {service.get_working_model()}\n")
 
         if not connected:
             print("API 연결 실패. 키를 확인해주세요.")
@@ -378,6 +601,7 @@ if __name__ == "__main__":
         print(f"   미리보기: {blog.summary[:100]}...\n")
 
         print("=== 모든 테스트 완료 ===")
+        print(f"최종 사용 모델: {service.get_working_model()}")
 
     except GeminiServiceError as e:
         print(f"Gemini 서비스 오류: {e}")

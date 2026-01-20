@@ -3,10 +3,10 @@ NaverBlogPoster - 메인 GUI 앱
 """
 
 import customtkinter as ctk
-from typing import Optional, List
+from typing import Optional
 import threading
 
-from gui.frames import LoginFrame, CategoryFrame, ApiFrame, TopicFrame, ActionFrame, LogFrame
+from gui.frames import LoginFrame, ApiFrame, TopicFrame, ActionFrame, LogFrame
 from core.config_manager import ConfigManager
 from utils.logger import Logger
 
@@ -19,8 +19,8 @@ class NaverBlogPosterApp(ctk.CTk):
 
         # 앱 설정
         self.title("NaverBlogPoster - 네이버 블로그 자동 포스팅")
-        self.geometry("700x850")
-        self.minsize(600, 750)
+        self.geometry("700x800")
+        self.minsize(600, 700)
 
         # 테마 설정
         ctk.set_appearance_mode("dark")
@@ -32,10 +32,7 @@ class NaverBlogPosterApp(ctk.CTk):
 
         # 상태 변수
         self.is_running = False
-        self.is_logged_in = False
         self.posting_thread: Optional[threading.Thread] = None
-        self.login_thread: Optional[threading.Thread] = None
-        self.naver_service = None  # 로그인 후 유지
 
         # UI 구성
         self._setup_ui()
@@ -68,12 +65,9 @@ class NaverBlogPosterApp(ctk.CTk):
         )
         subtitle_label.pack(pady=(0, 15))
 
-        # 프레임들 생성 (순서: 로그인 → 카테고리 → API → 포스팅설정 → 액션 → 로그)
+        # 프레임들 생성
         self.login_frame = LoginFrame(self.main_container, self)
         self.login_frame.pack(fill="x", pady=(0, 10))
-
-        self.category_frame = CategoryFrame(self.main_container, self)
-        self.category_frame.pack(fill="x", pady=(0, 10))
 
         self.api_frame = ApiFrame(self.main_container, self)
         self.api_frame.pack(fill="x", pady=(0, 10))
@@ -90,7 +84,7 @@ class NaverBlogPosterApp(ctk.CTk):
         # 상태바
         self.status_bar = ctk.CTkLabel(
             self,
-            text="준비됨 - 로그인 후 포스팅 가능",
+            text="준비됨",
             font=ctk.CTkFont(size=11),
             anchor="w"
         )
@@ -120,16 +114,8 @@ class NaverBlogPosterApp(ctk.CTk):
             self.logger.log("저장된 설정을 불러왔습니다.")
 
     def _on_closing(self):
-        """창 닫기 시 자동저장 및 리소스 정리"""
+        """창 닫기 시 자동저장"""
         self._auto_save_if_enabled()
-
-        # NaverService 종료
-        if self.naver_service:
-            try:
-                self.naver_service.close()
-            except Exception:
-                pass
-
         self.destroy()
 
     def _auto_save_if_enabled(self):
@@ -182,17 +168,13 @@ class NaverBlogPosterApp(ctk.CTk):
             self.logger.log("이미 실행 중입니다.", "warning")
             return
 
-        # 로그인 확인
-        if not self.is_logged_in or not self.naver_service:
-            self.logger.log("먼저 로그인을 해주세요.", "error")
-            return
-
-        # 카테고리 확인
-        if not self.category_frame.is_ready():
-            self.logger.log("카테고리를 불러와주세요.", "error")
-            return
-
         # 필수 입력값 검증
+        if not self.login_frame.get_naver_id():
+            self.logger.log("네이버 ID를 입력해주세요.", "error")
+            return
+        if not self.login_frame.get_naver_pw():
+            self.logger.log("네이버 비밀번호를 입력해주세요.", "error")
+            return
         if not self.api_frame.get_api_key():
             self.logger.log("Gemini API Key를 입력해주세요.", "error")
             return
@@ -213,11 +195,6 @@ class NaverBlogPosterApp(ctk.CTk):
         try:
             from core.posting_engine import PostingEngine
 
-            # 선택된 카테고리 정보
-            selected_category = self.category_frame.get_selected_category()
-            category_name = selected_category["name"] if selected_category else "전체"
-            category_id = selected_category["id"] if selected_category else "0"
-
             engine = PostingEngine(
                 naver_id=self.login_frame.get_naver_id(),
                 naver_pw=self.login_frame.get_naver_pw(),
@@ -226,20 +203,52 @@ class NaverBlogPosterApp(ctk.CTk):
                 keywords=self.topic_frame.get_keywords(),
                 use_image=self.topic_frame.get_use_image(),
                 use_emoji=self.topic_frame.get_use_emoji(),
-                logger=self.logger,
-                naver_service=self.naver_service,  # 기존 로그인된 서비스 재사용
-                blog_category_id=category_id,
-                blog_category_name=category_name
+                logger=self.logger
             )
 
-            engine.run()
+            result = engine.run()
+
+            # 실패 시 에러 팝업 표시
+            if not result.success and result.error_type:
+                self.after(0, lambda: self._show_error_popup(
+                    result.error_type,
+                    result.error_message or "알 수 없는 오류",
+                    result.retry_seconds
+                ))
 
         except Exception as e:
             self.logger.log(f"오류 발생: {str(e)}", "error")
         finally:
             self.is_running = False
             self.after(0, lambda: self.action_frame.set_running_state(False))
-            self.after(0, lambda: self.set_status("로그인 완료 - 포스팅 준비됨"))
+            self.after(0, lambda: self.set_status("준비됨"))
+
+    def _show_error_popup(self, error_type: str, message: str, retry_seconds: int):
+        """에러 팝업 표시"""
+        from gui.dialogs.error_dialog import ErrorDialog, ErrorType
+
+        # 문자열을 ErrorType으로 변환
+        type_map = {
+            'api_key_invalid': ErrorType.API_KEY_INVALID,
+            'quota_exceeded': ErrorType.QUOTA_EXCEEDED,
+            'model_not_found': ErrorType.MODEL_NOT_FOUND,
+            'network_error': ErrorType.NETWORK_ERROR,
+            'unknown': ErrorType.UNKNOWN
+        }
+
+        err_type = type_map.get(error_type, ErrorType.UNKNOWN)
+
+        # 재시도 콜백
+        def on_retry():
+            self.start_posting()
+
+        ErrorDialog(
+            self,
+            error_type=err_type,
+            message=message,
+            retry_seconds=retry_seconds,
+            on_retry=on_retry if retry_seconds > 0 else None
+        )
 
     def stop_posting(self):
         """포스팅 중지"""
@@ -258,99 +267,3 @@ class NaverBlogPosterApp(ctk.CTk):
     def log(self, message: str, level: str = "info"):
         """로그 출력"""
         self.logger.log(message, level)
-
-    def login_and_fetch_categories(self):
-        """로그인 후 카테고리 불러오기"""
-        if self.login_thread and self.login_thread.is_alive():
-            self.logger.log("이미 로그인 중입니다.", "warning")
-            return
-
-        # 필수 입력값 검증
-        if not self.login_frame.get_naver_id():
-            self.logger.log("네이버 ID를 입력해주세요.", "error")
-            return
-        if not self.login_frame.get_naver_pw():
-            self.logger.log("네이버 비밀번호를 입력해주세요.", "error")
-            return
-
-        # UI 상태 변경
-        self.login_frame.set_login_button_state(False, "로그인 중...")
-        self.set_status("로그인 중...")
-
-        # 별도 스레드에서 로그인 실행
-        self.login_thread = threading.Thread(target=self._run_login, daemon=True)
-        self.login_thread.start()
-
-    def _run_login(self):
-        """로그인 실행 (별도 스레드)"""
-        try:
-            from services.naver_service import NaverService, NaverServiceError
-
-            self.logger.log("네이버 로그인 시작...")
-
-            # 기존 서비스가 있으면 종료
-            if self.naver_service:
-                try:
-                    self.naver_service.close()
-                except Exception:
-                    pass
-
-            # NaverService 초기화 및 로그인
-            self.naver_service = NaverService(
-                headless=False,
-                logger=self.logger
-            )
-
-            login_success = self.naver_service.login(
-                user_id=self.login_frame.get_naver_id(),
-                password=self.login_frame.get_naver_pw()
-            )
-
-            if login_success:
-                # 카테고리 가져오기
-                self.logger.log("카테고리 불러오는 중...")
-                categories = self.naver_service.get_categories()
-
-                # UI 업데이트 (메인 스레드)
-                self.after(0, lambda: self._on_login_success(categories))
-            else:
-                self.after(0, lambda: self._on_login_failure("로그인 실패: 아이디/비밀번호를 확인해주세요"))
-
-        except NaverServiceError as e:
-            self.after(0, lambda: self._on_login_failure(str(e)))
-        except Exception as e:
-            self.after(0, lambda: self._on_login_failure(f"오류 발생: {str(e)}"))
-
-    def _on_login_success(self, categories: List[dict]):
-        """로그인 성공 처리"""
-        self.is_logged_in = True
-
-        # 카테고리 설정
-        self.category_frame.set_categories(categories)
-
-        # UI 상태 업데이트
-        self.login_frame.set_login_button_state(True, "✅ 로그인됨 (재로그인)")
-        self.action_frame.set_posting_enabled(True)
-        self.set_status("로그인 완료 - 포스팅 준비됨")
-
-        self.logger.log(f"✅ 로그인 성공! 카테고리 {len(categories)}개 불러옴", "info")
-
-    def _on_login_failure(self, error_message: str):
-        """로그인 실패 처리"""
-        self.is_logged_in = False
-
-        # 서비스 정리
-        if self.naver_service:
-            try:
-                self.naver_service.close()
-            except Exception:
-                pass
-            self.naver_service = None
-
-        # UI 상태 업데이트
-        self.login_frame.set_login_button_state(True, "로그인 & 카테고리 불러오기")
-        self.category_frame.reset()
-        self.action_frame.set_posting_enabled(False)
-        self.set_status("로그인 실패 - 다시 시도해주세요")
-
-        self.logger.log(f"❌ {error_message}", "error")

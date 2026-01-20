@@ -11,7 +11,6 @@ class ActionFrame(ctk.CTkFrame):
     def __init__(self, parent, app):
         super().__init__(parent)
         self.app = app
-        self._posting_enabled = False
 
         self._setup_ui()
 
@@ -31,7 +30,7 @@ class ActionFrame(ctk.CTkFrame):
         )
         self.save_btn.pack(side="left", padx=(0, 10))
 
-        # 포스팅 실행 버튼 (기본 비활성화)
+        # 포스팅 실행 버튼
         self.run_btn = ctk.CTkButton(
             btn_container,
             text="포스팅 실행",
@@ -39,7 +38,6 @@ class ActionFrame(ctk.CTkFrame):
             height=40,
             fg_color="#28a745",
             hover_color="#218838",
-            state="disabled",
             command=self.app.start_posting
         )
         self.run_btn.pack(side="left", padx=(0, 10))
@@ -57,14 +55,6 @@ class ActionFrame(ctk.CTkFrame):
         )
         self.stop_btn.pack(side="left")
 
-    def set_posting_enabled(self, enabled: bool):
-        """포스팅 버튼 활성화/비활성화"""
-        self._posting_enabled = enabled
-        if enabled:
-            self.run_btn.configure(state="normal")
-        else:
-            self.run_btn.configure(state="disabled")
-
     def set_running_state(self, is_running: bool):
         """실행 상태에 따른 버튼 상태 변경"""
         if is_running:
@@ -72,10 +62,6 @@ class ActionFrame(ctk.CTkFrame):
             self.stop_btn.configure(state="normal")
             self.save_btn.configure(state="disabled")
         else:
-            # 포스팅 활성화 상태에 따라 버튼 상태 결정
-            if self._posting_enabled:
-                self.run_btn.configure(state="normal")
-            else:
-                self.run_btn.configure(state="disabled")
+            self.run_btn.configure(state="normal")
             self.stop_btn.configure(state="disabled")
             self.save_btn.configure(state="normal")

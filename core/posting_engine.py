@@ -69,6 +69,9 @@ class EngineResult:
     image_path: Optional[str] = None
     error_message: Optional[str] = None
     elapsed_time: float = 0.0
+    # 에러 상세 정보
+    error_type: Optional[str] = None  # api_key_invalid, quota_exceeded, model_not_found, unknown
+    retry_seconds: int = 0  # 재시도까지 대기 시간
 
 
 class PostingEngine:
@@ -85,10 +88,7 @@ class PostingEngine:
         use_emoji: bool = True,
         headless: bool = False,
         logger: Optional[Callable] = None,
-        progress_callback: Optional[Callable[[PostingProgress], None]] = None,
-        naver_service=None,
-        blog_category_id: str = "",
-        blog_category_name: str = ""
+        progress_callback: Optional[Callable[[PostingProgress], None]] = None
     ):
         """
         Args:
@@ -102,9 +102,6 @@ class PostingEngine:
             headless: 브라우저 숨김 모드
             logger: 로그 출력 함수
             progress_callback: 진행 상황 콜백
-            naver_service: 기존 NaverService 인스턴스 (로그인된 상태)
-            blog_category_id: 블로그 카테고리 ID
-            blog_category_name: 블로그 카테고리 이름
         """
         self.naver_id = naver_id
         self.naver_pw = naver_pw
@@ -116,11 +113,6 @@ class PostingEngine:
         self.headless = headless
         self.logger = logger or print
         self.progress_callback = progress_callback
-
-        # 기존 NaverService 재사용
-        self.naver_service = naver_service
-        self.blog_category_id = blog_category_id
-        self.blog_category_name = blog_category_name
 
         # 진행 상황
         self.progress = PostingProgress()
@@ -269,12 +261,19 @@ class PostingEngine:
                 f"오류 발생: {e}",
                 error=str(e)
             )
+            # 에러 타입 정보 포함
+            error_type_str = None
+            if e.error_type:
+                error_type_str = e.error_type.value if hasattr(e.error_type, 'value') else str(e.error_type)
+
             return EngineResult(
                 success=False,
                 error_message=str(e),
                 elapsed_time=elapsed,
                 title=self.progress.title,
-                topic=self.progress.topic
+                topic=self.progress.topic,
+                error_type=error_type_str,
+                retry_seconds=e.retry_seconds
             )
 
         except Exception as e:
@@ -328,6 +327,7 @@ class PostingEngine:
     def _generate_content(self, topic: str):
         """콘텐츠 생성"""
         from agents.content_agent import ContentAgent, ContentAgentError
+        from services.gemini_service import GeminiServiceError, GeminiErrorType
 
         if self._content_agent is None:
             self._content_agent = ContentAgent(
@@ -341,6 +341,13 @@ class PostingEngine:
                 category=self.category,
                 keywords=self.keywords if self.keywords else [topic],
                 use_emoji=self.use_emoji
+            )
+        except GeminiServiceError as e:
+            # Gemini 에러 타입 정보 포함하여 전달
+            raise PostingEngineError(
+                f"콘텐츠 생성 실패: {e}",
+                error_type=e.error_type,
+                retry_seconds=e.retry_seconds
             )
         except ContentAgentError as e:
             raise PostingEngineError(f"콘텐츠 생성 실패: {e}")
@@ -374,26 +381,6 @@ class PostingEngine:
         """네이버 블로그 포스팅"""
         from agents.posting_agent import PostingAgent, PostingAgentError
 
-        # 기존 NaverService가 있으면 재사용
-        if self.naver_service:
-            self.logger(f"기존 로그인 세션 사용 (카테고리: {self.blog_category_name})")
-
-            images = [image_path] if image_path else None
-
-            result = self.naver_service.create_post(
-                title=title,
-                content=content,
-                tags=tags,
-                category=self.blog_category_id,
-                images=images
-            )
-
-            if not result.success:
-                raise PostingEngineError(f"포스팅 실패: {result.error_message}")
-
-            return result
-
-        # 기존 방식 (새로 로그인)
         if self._posting_agent is None:
             self._posting_agent = PostingAgent(
                 headless=self.headless,
@@ -418,8 +405,6 @@ class PostingEngine:
 
     def _cleanup(self):
         """리소스 정리"""
-        # 기존 NaverService는 유지 (app에서 관리)
-        # PostingAgent만 정리
         if self._posting_agent:
             try:
                 self._posting_agent.close()
@@ -443,7 +428,11 @@ class PostingEngine:
 
 class PostingEngineError(Exception):
     """포스팅 엔진 예외"""
-    pass
+
+    def __init__(self, message: str, error_type=None, retry_seconds: int = 0):
+        super().__init__(message)
+        self.error_type = error_type
+        self.retry_seconds = retry_seconds
 
 
 # 독립 실행 테스트
