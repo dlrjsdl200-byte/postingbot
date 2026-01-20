@@ -88,7 +88,9 @@ class PostingEngine:
         use_emoji: bool = True,
         headless: bool = False,
         logger: Optional[Callable] = None,
-        progress_callback: Optional[Callable[[PostingProgress], None]] = None
+        progress_callback: Optional[Callable[[PostingProgress], None]] = None,
+        reference_content: Optional[str] = None,
+        reference_title: Optional[str] = None
     ):
         """
         Args:
@@ -102,6 +104,8 @@ class PostingEngine:
             headless: 브라우저 숨김 모드
             logger: 로그 출력 함수
             progress_callback: 진행 상황 콜백
+            reference_content: 참고 자료 내용
+            reference_title: 참고 자료 제목
         """
         self.naver_id = naver_id
         self.naver_pw = naver_pw
@@ -113,6 +117,8 @@ class PostingEngine:
         self.headless = headless
         self.logger = logger or print
         self.progress_callback = progress_callback
+        self.reference_content = reference_content
+        self.reference_title = reference_title
 
         # 진행 상황
         self.progress = PostingProgress()
@@ -340,7 +346,9 @@ class PostingEngine:
                 topic=topic,
                 category=self.category,
                 keywords=self.keywords if self.keywords else [topic],
-                use_emoji=self.use_emoji
+                use_emoji=self.use_emoji,
+                reference_content=self.reference_content,
+                reference_title=self.reference_title
             )
         except GeminiServiceError as e:
             # Gemini 에러 타입 정보 포함하여 전달

@@ -51,7 +51,9 @@ class ContentAgent:
         keywords: Optional[List[str]] = None,
         use_emoji: bool = True,
         min_length: int = 1500,
-        max_length: int = 3000
+        max_length: int = 3000,
+        reference_content: Optional[str] = None,
+        reference_title: Optional[str] = None
     ) -> GeneratedContent:
         """
         블로그 콘텐츠 생성
@@ -63,6 +65,8 @@ class ContentAgent:
             use_emoji: 이모지 사용 여부
             min_length: 최소 글자 수
             max_length: 최대 글자 수
+            reference_content: 참고 자료 내용
+            reference_title: 참고 자료 제목
 
         Returns:
             GeneratedContent 객체
@@ -70,15 +74,29 @@ class ContentAgent:
         self.logger(f"콘텐츠 생성 시작: {topic}")
 
         try:
-            # 1. 블로그 글 생성
-            blog = self.gemini.generate_blog_post(
-                topic=topic,
-                category=category,
-                keywords=keywords,
-                use_emoji=use_emoji,
-                min_length=min_length,
-                max_length=max_length
-            )
+            # 참고 자료가 있는 경우 별도 프롬프트 사용
+            if reference_content:
+                self.logger("참고 자료 기반으로 글 작성 중...")
+                blog = self._generate_with_reference(
+                    topic=topic,
+                    category=category,
+                    keywords=keywords,
+                    use_emoji=use_emoji,
+                    min_length=min_length,
+                    max_length=max_length,
+                    reference_content=reference_content,
+                    reference_title=reference_title
+                )
+            else:
+                # 기존 방식
+                blog = self.gemini.generate_blog_post(
+                    topic=topic,
+                    category=category,
+                    keywords=keywords,
+                    use_emoji=use_emoji,
+                    min_length=min_length,
+                    max_length=max_length
+                )
 
             # 2. 이미지 프롬프트 생성
             image_prompt = self.gemini.generate_image_prompt(
@@ -99,6 +117,67 @@ class ContentAgent:
         except GeminiServiceError as e:
             self.logger(f"콘텐츠 생성 실패: {e}")
             raise ContentAgentError(f"콘텐츠 생성 실패: {e}")
+
+    def _generate_with_reference(
+        self,
+        topic: str,
+        category: str,
+        keywords: Optional[List[str]],
+        use_emoji: bool,
+        min_length: int,
+        max_length: int,
+        reference_content: str,
+        reference_title: Optional[str]
+    ):
+        """참고 자료 기반 콘텐츠 생성"""
+        from services.gemini_service import BlogContent
+
+        keywords_str = ", ".join(keywords) if keywords else topic
+        emoji_instruction = "이모지를 적절히 사용해서" if use_emoji else "이모지 없이"
+
+        # 참고 내용이 너무 길면 자르기
+        ref_content = reference_content[:3000] if len(reference_content) > 3000 else reference_content
+
+        prompt = f"""당신은 네이버 블로그 전문 작가입니다.
+아래 참고 자료를 바탕으로 새로운 블로그 글을 작성해주세요.
+
+[참고 자료]
+제목: {reference_title or '없음'}
+내용:
+{ref_content}
+
+[작성 주제] {topic}
+[카테고리] {category}
+[키워드] {keywords_str}
+
+[작성 조건]
+1. 참고 자료의 핵심 정보를 활용하되, 완전히 새로운 글로 재구성
+2. {emoji_instruction} 친근하고 읽기 쉬운 문체로 작성
+3. 글 길이: {min_length}~{max_length}자
+4. 서론, 본론, 결론 구조로 작성
+5. 소제목(##)을 3-5개 사용하여 가독성 높이기
+6. 참고 자료에 없는 추가 정보나 팁도 포함
+7. 독자가 공감할 수 있는 개인적인 의견 추가
+8. 마지막에 독자 참여를 유도하는 질문 추가
+
+[중요]
+- 참고 자료를 그대로 복사하지 말고, 자신만의 언어로 재해석
+- 출처를 밝히지 않아도 됨 (블로그 글이므로)
+- 더 풍부하고 유용한 정보 제공
+
+[출력 형식]
+제목: (참고 자료와 다른 새로운 제목)
+
+(본문 내용)
+
+태그: (쉼표로 구분된 5-7개 태그)
+"""
+
+        self.logger("참고 자료 기반 글 생성 중...")
+        response = self.gemini._generate(prompt)
+
+        # 응답 파싱
+        return self.gemini._parse_blog_response(response, topic)
 
     def generate_titles(
         self,

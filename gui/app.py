@@ -195,6 +195,16 @@ class NaverBlogPosterApp(ctk.CTk):
         try:
             from core.posting_engine import PostingEngine
 
+            # 참고 URL 크롤링 결과 가져오기
+            crawl_result = self.topic_frame.get_crawl_result()
+            reference_content = None
+            reference_title = None
+
+            if crawl_result and crawl_result.success:
+                reference_content = crawl_result.content
+                reference_title = crawl_result.title
+                self.logger.log(f"참고 자료 사용: {reference_title}")
+
             engine = PostingEngine(
                 naver_id=self.login_frame.get_naver_id(),
                 naver_pw=self.login_frame.get_naver_pw(),
@@ -203,7 +213,9 @@ class NaverBlogPosterApp(ctk.CTk):
                 keywords=self.topic_frame.get_keywords(),
                 use_image=self.topic_frame.get_use_image(),
                 use_emoji=self.topic_frame.get_use_emoji(),
-                logger=self.logger
+                logger=self.logger,
+                reference_content=reference_content,
+                reference_title=reference_title
             )
 
             result = engine.run()
