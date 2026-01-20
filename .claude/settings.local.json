@@ -7,7 +7,10 @@
       "Bash(python -m core.encryption:*)",
       "Bash(python -m core.config_manager:*)",
       "Bash(git init:*)",
-      "Bash(git add:*)"
+      "Bash(git add:*)",
+      "Bash(git commit:*)",
+      "Bash(git config:*)",
+      "Bash(python -m agents.trend_agent:*)"
     ]
   }
 }
