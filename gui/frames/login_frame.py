@@ -12,6 +12,7 @@ class LoginFrame(ctk.CTkFrame):
         super().__init__(parent)
         self.app = app
         self._show_password = False
+        self._is_logging_in = False
 
         self._setup_ui()
 
@@ -70,6 +71,25 @@ class LoginFrame(ctk.CTkFrame):
         )
         self.toggle_pw_btn.pack(side="right")
 
+        # 로그인 & 카테고리 불러오기 버튼
+        login_btn_frame = ctk.CTkFrame(self, fg_color="transparent")
+        login_btn_frame.pack(fill="x", padx=15, pady=(5, 10))
+
+        self.login_btn = ctk.CTkButton(
+            login_btn_frame,
+            text="로그인 & 카테고리 불러오기",
+            height=35,
+            fg_color="#1E90FF",
+            hover_color="#1873CC",
+            command=self._on_login_click
+        )
+        self.login_btn.pack(fill="x")
+
+    def _on_login_click(self):
+        """로그인 버튼 클릭"""
+        if hasattr(self.app, 'login_and_fetch_categories'):
+            self.app.login_and_fetch_categories()
+
     def _toggle_password(self):
         """비밀번호 보기/숨기기 토글"""
         self._show_password = not self._show_password
@@ -102,3 +122,12 @@ class LoginFrame(ctk.CTkFrame):
         self.id_entry.insert(0, naver_id)
         self.pw_entry.delete(0, "end")
         self.pw_entry.insert(0, naver_pw)
+
+    def set_login_button_state(self, enabled: bool, text: str = None):
+        """로그인 버튼 상태 설정"""
+        if enabled:
+            self.login_btn.configure(state="normal")
+        else:
+            self.login_btn.configure(state="disabled")
+        if text:
+            self.login_btn.configure(text=text)

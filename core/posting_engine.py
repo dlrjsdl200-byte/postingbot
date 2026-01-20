@@ -85,7 +85,10 @@ class PostingEngine:
         use_emoji: bool = True,
         headless: bool = False,
         logger: Optional[Callable] = None,
-        progress_callback: Optional[Callable[[PostingProgress], None]] = None
+        progress_callback: Optional[Callable[[PostingProgress], None]] = None,
+        naver_service=None,
+        blog_category_id: str = "",
+        blog_category_name: str = ""
     ):
         """
         Args:
@@ -99,6 +102,9 @@ class PostingEngine:
             headless: 브라우저 숨김 모드
             logger: 로그 출력 함수
             progress_callback: 진행 상황 콜백
+            naver_service: 기존 NaverService 인스턴스 (로그인된 상태)
+            blog_category_id: 블로그 카테고리 ID
+            blog_category_name: 블로그 카테고리 이름
         """
         self.naver_id = naver_id
         self.naver_pw = naver_pw
@@ -110,6 +116,11 @@ class PostingEngine:
         self.headless = headless
         self.logger = logger or print
         self.progress_callback = progress_callback
+
+        # 기존 NaverService 재사용
+        self.naver_service = naver_service
+        self.blog_category_id = blog_category_id
+        self.blog_category_name = blog_category_name
 
         # 진행 상황
         self.progress = PostingProgress()
@@ -363,6 +374,26 @@ class PostingEngine:
         """네이버 블로그 포스팅"""
         from agents.posting_agent import PostingAgent, PostingAgentError
 
+        # 기존 NaverService가 있으면 재사용
+        if self.naver_service:
+            self.logger(f"기존 로그인 세션 사용 (카테고리: {self.blog_category_name})")
+
+            images = [image_path] if image_path else None
+
+            result = self.naver_service.create_post(
+                title=title,
+                content=content,
+                tags=tags,
+                category=self.blog_category_id,
+                images=images
+            )
+
+            if not result.success:
+                raise PostingEngineError(f"포스팅 실패: {result.error_message}")
+
+            return result
+
+        # 기존 방식 (새로 로그인)
         if self._posting_agent is None:
             self._posting_agent = PostingAgent(
                 headless=self.headless,
@@ -387,6 +418,8 @@ class PostingEngine:
 
     def _cleanup(self):
         """리소스 정리"""
+        # 기존 NaverService는 유지 (app에서 관리)
+        # PostingAgent만 정리
         if self._posting_agent:
             try:
                 self._posting_agent.close()
