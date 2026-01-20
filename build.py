@@ -25,25 +25,44 @@ def build():
         "--onefile",
         "--windowed",
         "--noconfirm",
-        # Hidden imports
+        # Hidden imports - customtkinter
         "--hidden-import=customtkinter",
+        # Hidden imports - Google Generative AI
         "--hidden-import=google.generativeai",
+        "--hidden-import=google.ai",
+        "--hidden-import=google.ai.generativelanguage",
+        "--hidden-import=google.api_core",
+        "--hidden-import=google.auth",
+        "--hidden-import=google.protobuf",
+        "--hidden-import=grpc",
+        "--hidden-import=proto",
+        # Hidden imports - Selenium
         "--hidden-import=selenium",
         "--hidden-import=selenium.webdriver",
         "--hidden-import=selenium.webdriver.chrome",
         "--hidden-import=selenium.webdriver.chrome.service",
         "--hidden-import=selenium.webdriver.chrome.options",
+        "--hidden-import=selenium.webdriver.common.by",
+        "--hidden-import=selenium.webdriver.common.keys",
+        "--hidden-import=selenium.webdriver.support.ui",
+        "--hidden-import=selenium.webdriver.support.expected_conditions",
         "--hidden-import=webdriver_manager",
         "--hidden-import=webdriver_manager.chrome",
+        # Hidden imports - PIL
         "--hidden-import=PIL",
         "--hidden-import=PIL.Image",
+        # Hidden imports - Cryptography
         "--hidden-import=cryptography",
         "--hidden-import=cryptography.fernet",
+        # Hidden imports - Others
         "--hidden-import=requests",
         "--hidden-import=bs4",
         "--hidden-import=pyperclip",
-        # Collect all for customtkinter (has assets)
+        "--hidden-import=tqdm",
+        # Collect all packages
         "--collect-all=customtkinter",
+        "--collect-all=google.generativeai",
+        "--collect-all=google.ai.generativelanguage",
         # Main script
         "main.py"
     ]
