@@ -18,13 +18,29 @@ class LoginFrame(ctk.CTkFrame):
     def _setup_ui(self):
         """UI 구성"""
         # 헤더
+        header_frame = ctk.CTkFrame(self, fg_color="transparent")
+        header_frame.pack(fill="x", padx=15, pady=(10, 5))
+
         header = ctk.CTkLabel(
-            self,
+            header_frame,
             text="네이버 계정",
             font=ctk.CTkFont(size=14, weight="bold"),
             anchor="w"
         )
-        header.pack(fill="x", padx=15, pady=(10, 5))
+        header.pack(side="left")
+
+        # 자동저장 체크박스
+        self.auto_save_var = ctk.BooleanVar(value=True)
+        self.auto_save_checkbox = ctk.CTkCheckBox(
+            header_frame,
+            text="자동저장",
+            variable=self.auto_save_var,
+            width=80,
+            checkbox_width=18,
+            checkbox_height=18,
+            font=ctk.CTkFont(size=12)
+        )
+        self.auto_save_checkbox.pack(side="right")
 
         # ID 입력
         id_frame = ctk.CTkFrame(self, fg_color="transparent")
@@ -71,6 +87,14 @@ class LoginFrame(ctk.CTkFrame):
     def get_naver_pw(self) -> str:
         """네이버 비밀번호 반환"""
         return self.pw_entry.get()
+
+    def get_auto_save(self) -> bool:
+        """자동저장 여부 반환"""
+        return self.auto_save_var.get()
+
+    def set_auto_save(self, value: bool):
+        """자동저장 설정"""
+        self.auto_save_var.set(value)
 
     def set_values(self, naver_id: str, naver_pw: str):
         """값 설정"""

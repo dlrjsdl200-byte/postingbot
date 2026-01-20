@@ -10,7 +10,12 @@
       "Bash(git add:*)",
       "Bash(git commit:*)",
       "Bash(git config:*)",
-      "Bash(python -m agents.trend_agent:*)"
+      "Bash(python -m agents.trend_agent:*)",
+      "Bash(timeout 3 python:*)",
+      "Bash(git remote add:*)",
+      "Bash(git branch:*)",
+      "Bash(git push:*)",
+      "Bash(python build.py:*)"
     ]
   }
 }

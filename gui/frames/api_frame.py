@@ -29,10 +29,23 @@ class ApiFrame(ctk.CTkFrame):
         )
         header.pack(side="left")
 
+        # 자동저장 체크박스
+        self.auto_save_var = ctk.BooleanVar(value=True)
+        self.auto_save_checkbox = ctk.CTkCheckBox(
+            header_frame,
+            text="자동저장",
+            variable=self.auto_save_var,
+            width=80,
+            checkbox_width=18,
+            checkbox_height=18,
+            font=ctk.CTkFont(size=12)
+        )
+        self.auto_save_checkbox.pack(side="right", padx=(0, 10))
+
         help_btn = ctk.CTkButton(
             header_frame,
-            text="API 키 발급 방법",
-            width=120,
+            text="API 키 발급",
+            width=90,
             height=25,
             font=ctk.CTkFont(size=11),
             command=self._open_api_guide
@@ -60,6 +73,14 @@ class ApiFrame(ctk.CTkFrame):
     def get_api_key(self) -> str:
         """API Key 반환"""
         return self.api_entry.get().strip()
+
+    def get_auto_save(self) -> bool:
+        """자동저장 여부 반환"""
+        return self.auto_save_var.get()
+
+    def set_auto_save(self, value: bool):
+        """자동저장 설정"""
+        self.auto_save_var.set(value)
 
     def set_values(self, api_key: str):
         """값 설정"""

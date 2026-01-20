@@ -19,6 +19,10 @@ class Logger:
         # GUI 업데이트는 메인 스레드에서 해야 함
         self.app.after(0, lambda: self._log_to_gui(message, level))
 
+    def __call__(self, message: str, level: str = "info"):
+        """함수처럼 호출 가능하게 지원"""
+        self.log(message, level)
+
     def _log_to_gui(self, message: str, level: str):
         """GUI에 로그 출력"""
         if hasattr(self.app, 'log_frame'):

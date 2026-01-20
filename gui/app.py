@@ -40,6 +40,9 @@ class NaverBlogPosterApp(ctk.CTk):
         # 저장된 설정 불러오기
         self._load_saved_config()
 
+        # 창 닫기 이벤트 바인딩 (자동저장)
+        self.protocol("WM_DELETE_WINDOW", self._on_closing)
+
     def _setup_ui(self):
         """UI 구성"""
         # 메인 컨테이너
@@ -49,7 +52,7 @@ class NaverBlogPosterApp(ctk.CTk):
         # 타이틀
         title_label = ctk.CTkLabel(
             self.main_container,
-            text="🚀 NaverBlogPoster",
+            text="NaverBlogPoster",
             font=ctk.CTkFont(size=24, weight="bold")
         )
         title_label.pack(pady=(0, 5))
@@ -104,10 +107,46 @@ class NaverBlogPosterApp(ctk.CTk):
                 config.get('use_image', True),
                 config.get('use_emoji', True)
             )
+            # 자동저장 설정 불러오기
+            self.login_frame.set_auto_save(config.get('auto_save_credentials', True))
+            self.api_frame.set_auto_save(config.get('auto_save_api_key', True))
+
             self.logger.log("저장된 설정을 불러왔습니다.")
 
+    def _on_closing(self):
+        """창 닫기 시 자동저장"""
+        self._auto_save_if_enabled()
+        self.destroy()
+
+    def _auto_save_if_enabled(self):
+        """자동저장이 활성화되어 있으면 저장"""
+        config = {
+            'category': self.topic_frame.get_category(),
+            'keywords': self.topic_frame.get_keywords(),
+            'use_image': self.topic_frame.get_use_image(),
+            'use_emoji': self.topic_frame.get_use_emoji(),
+            'auto_save_credentials': self.login_frame.get_auto_save(),
+            'auto_save_api_key': self.api_frame.get_auto_save()
+        }
+
+        # 네이버 계정 자동저장
+        if self.login_frame.get_auto_save():
+            config['naver_id'] = self.login_frame.get_naver_id()
+            config['naver_pw'] = self.login_frame.get_naver_pw()
+        else:
+            config['naver_id'] = ''
+            config['naver_pw'] = ''
+
+        # API 키 자동저장
+        if self.api_frame.get_auto_save():
+            config['gemini_api_key'] = self.api_frame.get_api_key()
+        else:
+            config['gemini_api_key'] = ''
+
+        self.config_manager.save_config(config)
+
     def save_config(self):
-        """현재 설정 저장"""
+        """현재 설정 저장 (수동)"""
         config = {
             'naver_id': self.login_frame.get_naver_id(),
             'naver_pw': self.login_frame.get_naver_pw(),
@@ -115,7 +154,9 @@ class NaverBlogPosterApp(ctk.CTk):
             'category': self.topic_frame.get_category(),
             'keywords': self.topic_frame.get_keywords(),
             'use_image': self.topic_frame.get_use_image(),
-            'use_emoji': self.topic_frame.get_use_emoji()
+            'use_emoji': self.topic_frame.get_use_emoji(),
+            'auto_save_credentials': self.login_frame.get_auto_save(),
+            'auto_save_api_key': self.api_frame.get_auto_save()
         }
         self.config_manager.save_config(config)
         self.logger.log("설정이 저장되었습니다.")
@@ -137,6 +178,9 @@ class NaverBlogPosterApp(ctk.CTk):
         if not self.api_frame.get_api_key():
             self.logger.log("Gemini API Key를 입력해주세요.", "error")
             return
+
+        # 자동저장 (포스팅 시작 전)
+        self._auto_save_if_enabled()
 
         self.is_running = True
         self.action_frame.set_running_state(True)
