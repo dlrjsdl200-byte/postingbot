@@ -39,7 +39,7 @@ class GeminiService:
     def __init__(
         self,
         api_key: str,
-        model_name: str = "gemini-1.5-flash",
+        model_name: str = "gemini-2.0-flash",
         logger: Optional[Callable] = None
     ):
         """
