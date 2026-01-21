@@ -98,11 +98,8 @@ class ContentAgent:
                     max_length=max_length
                 )
 
-            # 2. 이미지 프롬프트 생성
-            image_prompt = self.gemini.generate_image_prompt(
-                topic=topic,
-                style="modern minimalist blog illustration"
-            )
+            # 2. 이미지 프롬프트 생성 (API 호출 없이 템플릿 사용)
+            image_prompt = self._create_image_prompt_template(topic, category)
 
             self.logger(f"콘텐츠 생성 완료: {blog.title}")
 
@@ -269,6 +266,35 @@ class ContentAgent:
             keywords=keywords,
             use_emoji=use_emoji
         )
+
+    def _create_image_prompt_template(self, topic: str, category: str) -> str:
+        """
+        이미지 프롬프트 템플릿 생성 (API 호출 없이)
+
+        Args:
+            topic: 주제
+            category: 카테고리
+
+        Returns:
+            영문 이미지 프롬프트
+        """
+        # 카테고리별 스타일 매핑
+        category_styles = {
+            "IT/테크": "modern technology, digital, futuristic, blue tones, clean design",
+            "의료/약학": "medical, healthcare, clean white, professional, trust",
+            "여행": "travel, adventure, scenic landscape, vibrant colors, exploration",
+            "맛집/요리": "food photography, delicious, warm lighting, appetizing",
+            "육아/교육": "family, children, warm, caring, soft colors, education",
+            "재테크/경제": "finance, money, growth chart, professional, green tones",
+            "뷰티/패션": "beauty, fashion, elegant, stylish, aesthetic",
+            "운동/다이어트": "fitness, healthy lifestyle, energetic, dynamic",
+            "반려동물": "cute pets, animals, warm, loving, cozy",
+            "자기계발": "motivation, success, growth, inspiration, bright",
+        }
+
+        style = category_styles.get(category, "modern, clean, professional, minimalist")
+
+        return f"Blog header image about {topic}, {style}, high quality illustration, no text, visually appealing"
 
     def test_connection(self) -> bool:
         """API 연결 테스트"""

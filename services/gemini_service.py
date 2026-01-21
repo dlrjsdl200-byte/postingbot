@@ -43,8 +43,11 @@ class BlogContent:
 class GeminiService:
     """Google Gemini API 래퍼 (동적 모델 선택 지원)"""
 
-    # Rate limiting 설정
-    RATE_LIMIT_DELAY = 4  # 요청 간 최소 대기 시간 (초)
+    # Rate limiting 설정 (무료 플랜 기준: 15 RPM)
+    # 안전하게 분당 10회 = 6초 간격
+    RATE_LIMIT_DELAY = 6  # 요청 간 최소 대기 시간 (초)
+    RPM_LIMIT = 10  # 분당 최대 요청 수
+    RPM_WINDOW = 60  # RPM 윈도우 (초)
 
     def __init__(
         self,
@@ -60,6 +63,7 @@ class GeminiService:
         self.logger = logger or print
         self._genai = None
         self._last_request_time = 0
+        self._request_times = []  # RPM 추적용
         self._working_model = None  # 성공한 모델 저장
         self._available_models = []  # 사용 가능한 모델 목록
 
@@ -74,8 +78,13 @@ class GeminiService:
             self._genai = genai
             self.logger("Gemini API 클라이언트 초기화 완료")
 
-            # 사용 가능한 모델 목록 조회
-            self._fetch_available_models()
+            # API 호출 없이 하드코딩된 모델 목록 사용 (RPM 절약)
+            self._available_models = [
+                "models/gemini-2.0-flash",
+                "models/gemini-1.5-flash",
+                "models/gemini-1.5-pro",
+            ]
+            self._working_model = "models/gemini-2.0-flash"  # 기본 모델 설정
 
         except ImportError:
             raise GeminiServiceError(
@@ -118,11 +127,39 @@ class GeminiService:
             ]
 
     def _rate_limit(self):
-        """Rate limiting 적용"""
-        elapsed = time.time() - self._last_request_time
+        """Rate limiting 적용 (RPM 제한 준수)"""
+        current_time = time.time()
+
+        # 1분 이내 요청 기록만 유지
+        self._request_times = [
+            t for t in self._request_times
+            if current_time - t < self.RPM_WINDOW
+        ]
+
+        # RPM 제한 확인
+        if len(self._request_times) >= self.RPM_LIMIT:
+            # 가장 오래된 요청 이후 1분이 될 때까지 대기
+            oldest_request = self._request_times[0]
+            wait_time = self.RPM_WINDOW - (current_time - oldest_request) + 1
+            if wait_time > 0:
+                self.logger(f"RPM 제한 도달. {wait_time:.0f}초 대기 중...")
+                time.sleep(wait_time)
+                current_time = time.time()
+                # 대기 후 다시 정리
+                self._request_times = [
+                    t for t in self._request_times
+                    if current_time - t < self.RPM_WINDOW
+                ]
+
+        # 기본 요청 간격 유지
+        elapsed = current_time - self._last_request_time
         if elapsed < self.RATE_LIMIT_DELAY:
-            time.sleep(self.RATE_LIMIT_DELAY - elapsed)
+            sleep_time = self.RATE_LIMIT_DELAY - elapsed
+            time.sleep(sleep_time)
+
+        # 요청 시간 기록
         self._last_request_time = time.time()
+        self._request_times.append(self._last_request_time)
 
     def _extract_retry_seconds(self, error_msg: str) -> Optional[int]:
         """에러 메시지에서 재시도 대기 시간 추출"""
@@ -148,11 +185,20 @@ class GeminiService:
         quota_keywords = ['429', 'quota', 'rate limit', 'resource exhausted', 'too many requests']
         return any(keyword in error_msg for keyword in quota_keywords)
 
+    def _is_rpm_error(self, error: Exception) -> bool:
+        """RPM(분당 요청 수) 제한 에러인지 확인"""
+        error_msg = str(error).lower()
+        rpm_keywords = ['rpm', 'requests per minute', 'rate limit', 'too many requests']
+        return any(keyword in error_msg for keyword in rpm_keywords)
+
     def _call_api(self, model_name: str, prompt: str, retry_count: int = 0) -> str:
-        """특정 모델로 API 호출 (429 에러 시 자동 재시도)"""
-        max_retries = 3
+        """특정 모델로 API 호출 (429/RPM 에러 시 자동 재시도)"""
+        max_retries = 5  # RPM 제한 때문에 재시도 횟수 증가
 
         try:
+            # Rate limiting 적용
+            self._rate_limit()
+
             model = self._genai.GenerativeModel(model_name)
             response = model.generate_content(prompt)
             return response.text
@@ -160,16 +206,24 @@ class GeminiService:
         except Exception as e:
             error_msg = str(e)
 
-            # 429 할당량 초과 에러 처리
+            # 429 할당량/RPM 초과 에러 처리
             if self._is_quota_error(e) and retry_count < max_retries:
                 # 에러 메시지에서 대기 시간 추출
                 wait_seconds = self._extract_retry_seconds(error_msg)
 
-                if wait_seconds is None:
-                    # 기본 대기 시간 (지수 백오프)
-                    wait_seconds = min(30 * (2 ** retry_count), 120)
+                # RPM 에러인 경우 더 긴 대기 시간
+                if self._is_rpm_error(e):
+                    if wait_seconds is None or wait_seconds < 60:
+                        wait_seconds = 60  # RPM 리셋을 위해 최소 1분 대기
 
-                self.logger(f"할당량 초과! {wait_seconds}초 후 재시도합니다... ({retry_count + 1}/{max_retries})")
+                if wait_seconds is None:
+                    # 기본 대기 시간 (지수 백오프, 더 보수적으로)
+                    wait_seconds = min(45 * (2 ** retry_count), 180)
+
+                self.logger(f"API 제한! {wait_seconds}초 후 재시도합니다... ({retry_count + 1}/{max_retries})")
+
+                # 요청 기록 초기화 (RPM 윈도우 리셋)
+                self._request_times = []
 
                 # 대기 중 카운트다운 표시
                 for remaining in range(wait_seconds, 0, -10):
@@ -183,6 +237,81 @@ class GeminiService:
             # 다른 에러는 그대로 raise
             raise
 
+    def _get_sorted_models(self) -> List[str]:
+        """우선순위에 따라 정렬된 모델 목록 반환"""
+        if not self._available_models:
+            self._fetch_available_models()
+
+        def model_priority(model_name):
+            name_lower = model_name.lower()
+            # 2.5-flash > 2.0-flash > 1.5-flash > pro 순서
+            if '2.5' in name_lower and 'flash' in name_lower:
+                return (0, model_name)
+            elif '2.0' in name_lower and 'flash' in name_lower:
+                return (1, model_name)
+            elif 'flash' in name_lower:
+                return (2, model_name)
+            elif 'pro' in name_lower and 'vision' not in name_lower:
+                return (3, model_name)
+            return (99, model_name)
+
+        return sorted(self._available_models, key=model_priority)
+
+    def find_available_model(self, skip_test: bool = False) -> Optional[str]:
+        """
+        할당량이 있는 사용 가능한 모델 찾기
+
+        Args:
+            skip_test: True면 테스트 없이 첫 번째 모델 반환 (RPM 절약)
+
+        Returns:
+            사용 가능한 모델명 또는 None
+        """
+        sorted_models = self._get_sorted_models()
+
+        # 이미 성공한 모델이 있으면 그것 사용
+        if self._working_model and self._working_model in sorted_models:
+            self.logger(f"기존 모델 사용: {self._working_model}")
+            return self._working_model
+
+        # 테스트 건너뛰기 (RPM 절약)
+        if skip_test and sorted_models:
+            self._working_model = sorted_models[0]
+            self.logger(f"기본 모델 선택: {self._working_model}")
+            return self._working_model
+
+        self.logger("사용 가능한 모델 검색 중...")
+
+        for model in sorted_models[:3]:  # 상위 3개만 테스트 (RPM 절약)
+            try:
+                # Rate limiting 적용
+                self._rate_limit()
+
+                model_instance = self._genai.GenerativeModel(model)
+                # 아주 간단한 테스트
+                response = model_instance.generate_content("Hi")
+                if response.text:
+                    self.logger(f"사용 가능한 모델 발견: {model}")
+                    self._working_model = model
+                    return model
+            except Exception as e:
+                error_msg = str(e).lower()
+                if self._is_quota_error(e):
+                    # RPM 제한이면 잠시 대기 후 계속
+                    if self._is_rpm_error(e):
+                        self.logger(f"  {model}: RPM 제한 - 대기 후 계속")
+                        time.sleep(15)  # 15초 대기
+                        continue
+                    self.logger(f"  {model}: 할당량 초과")
+                elif '404' in error_msg or 'not found' in error_msg:
+                    self.logger(f"  {model}: 모델 없음")
+                else:
+                    self.logger(f"  {model}: 오류 - {error_msg[:50]}")
+                time.sleep(2)
+                continue
+
+        return None
+
     def _generate(self, prompt: str) -> str:
         """
         텍스트 생성 (동적 모델 선택)
@@ -193,42 +322,31 @@ class GeminiService:
         Returns:
             생성된 텍스트
         """
-        self._rate_limit()
-
         # 이전에 성공한 모델이 있으면 그것부터 시도
         if self._working_model:
             try:
                 result = self._call_api(self._working_model, prompt)
                 return result
             except Exception as e:
+                # RPM 에러면 대기 후 같은 모델로 재시도
+                if self._is_rpm_error(e):
+                    self.logger(f"RPM 제한 발생. 60초 대기 후 재시도...")
+                    time.sleep(60)
+                    try:
+                        result = self._call_api(self._working_model, prompt)
+                        return result
+                    except Exception:
+                        pass
                 self.logger(f"기존 모델 {self._working_model} 실패, 다른 모델 시도...")
                 self._working_model = None
 
-        # 사용 가능한 모델 목록이 없으면 다시 조회
-        if not self._available_models:
-            self._fetch_available_models()
-
-        # 모델 우선순위 정의 (flash 모델 우선)
-        priority_keywords = ['flash', 'pro']
-
-        # 우선순위에 따라 모델 정렬
-        def model_priority(model_name):
-            name_lower = model_name.lower()
-            for i, keyword in enumerate(priority_keywords):
-                if keyword in name_lower:
-                    # flash가 있으면 우선순위 높게
-                    if 'flash' in name_lower:
-                        return (0, model_name)
-                    return (i + 1, model_name)
-            return (99, model_name)
-
-        sorted_models = sorted(self._available_models, key=model_priority)
+        sorted_models = self._get_sorted_models()
 
         # 모든 모델 순차적으로 시도
         last_error = None
         quota_errors = []  # 할당량 초과된 모델 추적
 
-        for model in sorted_models:
+        for model in sorted_models[:5]:  # 상위 5개 모델만 시도
             try:
                 self.logger(f"모델 시도 중: {model}")
                 result = self._call_api(model, prompt)
@@ -240,7 +358,7 @@ class GeminiService:
 
                 # 429 에러인 경우 (이미 _call_api에서 재시도 했음)
                 if self._is_quota_error(e):
-                    self.logger(f"모델 {model} 할당량 초과")
+                    self.logger(f"모델 {model} 할당량/RPM 초과")
                     quota_errors.append(model)
                 else:
                     self.logger(f"모델 {model} 실패: {error_msg}")
@@ -473,6 +591,86 @@ Output only the prompt, nothing else."""
     def get_available_models(self) -> List[str]:
         """사용 가능한 모델 목록 반환"""
         return self._available_models.copy()
+
+    def get_model_quota_status(self) -> List[dict]:
+        """
+        각 모델별 할당량 상태 확인
+
+        Returns:
+            모델별 상태 리스트 [{"model": str, "status": str, "available": bool}]
+        """
+        results = []
+
+        # flash 모델 우선으로 정렬
+        priority_models = []
+        other_models = []
+
+        for model in self._available_models:
+            if 'flash' in model.lower():
+                priority_models.append(model)
+            elif 'pro' in model.lower() and 'vision' not in model.lower():
+                other_models.append(model)
+
+        # flash 모델만 + pro 모델 일부 (최대 5개)
+        test_models = priority_models[:3] + other_models[:2]
+
+        if not test_models:
+            test_models = self._available_models[:5]
+
+        for model in test_models:
+            try:
+                # 간단한 테스트 요청
+                model_instance = self._genai.GenerativeModel(model)
+                response = model_instance.generate_content("Hi")
+
+                # 성공
+                results.append({
+                    "model": model,
+                    "status": "사용 가능",
+                    "available": True
+                })
+
+            except Exception as e:
+                error_msg = str(e).lower()
+
+                if self._is_quota_error(e):
+                    # 할당량 초과
+                    retry_seconds = self._extract_retry_seconds(str(e))
+                    if retry_seconds:
+                        results.append({
+                            "model": model,
+                            "status": f"할당량 초과 ({retry_seconds}초 후)",
+                            "available": False
+                        })
+                    else:
+                        results.append({
+                            "model": model,
+                            "status": "할당량 초과",
+                            "available": False
+                        })
+                elif '404' in error_msg or 'not found' in error_msg:
+                    results.append({
+                        "model": model,
+                        "status": "모델 없음",
+                        "available": False
+                    })
+                elif 'api' in error_msg and 'key' in error_msg:
+                    results.append({
+                        "model": model,
+                        "status": "API 키 오류",
+                        "available": False
+                    })
+                else:
+                    results.append({
+                        "model": model,
+                        "status": "오류",
+                        "available": False
+                    })
+
+            # 요청 간 간격
+            time.sleep(1)
+
+        return results
 
 
 class GeminiServiceError(Exception):
