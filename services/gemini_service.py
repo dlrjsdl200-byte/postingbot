@@ -80,11 +80,12 @@ class GeminiService:
 
             # API 호출 없이 하드코딩된 모델 목록 사용 (RPM 절약)
             self._available_models = [
+                "models/gemini-2.5-flash-preview-05-20",
                 "models/gemini-2.0-flash",
                 "models/gemini-1.5-flash",
                 "models/gemini-1.5-pro",
             ]
-            self._working_model = "models/gemini-2.0-flash"  # 기본 모델 설정
+            self._working_model = "models/gemini-2.5-flash-preview-05-20"  # 기본 모델 설정
 
         except ImportError:
             raise GeminiServiceError(
