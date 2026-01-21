@@ -41,26 +41,29 @@ class NaverService:
     # URL 상수
     NAVER_LOGIN_URL = "https://nid.naver.com/nidlogin.login"
     BLOG_HOME_URL = "https://blog.naver.com"
-    BLOG_WRITE_URL = "https://blog.naver.com/{blog_id}/postwrite"
+    BLOG_WRITE_URL = "https://blog.naver.com/{blog_id}?Redirect=Write"
 
     # 타임아웃 설정
     DEFAULT_TIMEOUT = 10
     PAGE_LOAD_WAIT = 3
+    EDITOR_LOAD_WAIT = 5
 
     def __init__(
         self,
         headless: bool = False,
-        logger: Optional[Callable] = None
+        logger: Optional[Callable] = None,
+        blog_id: Optional[str] = None
     ):
         """
         Args:
             headless: 브라우저 숨김 모드
             logger: 로그 출력 함수
+            blog_id: 블로그 ID (미리 알고 있는 경우)
         """
         self.headless = headless
         self.logger = logger or print
         self.driver = None
-        self.blog_id = None
+        self.blog_id = blog_id
 
         self._init_driver()
 
@@ -137,6 +140,11 @@ class NaverService:
 
         self.logger("네이버 로그인 시도 중...")
 
+        # 네이버 ID를 블로그 ID로 사용
+        if not self.blog_id:
+            self.blog_id = user_id
+            self.logger(f"블로그 ID 설정: {self.blog_id}")
+
         try:
             # 로그인 페이지 접속
             self.driver.get(self.NAVER_LOGIN_URL)
@@ -163,17 +171,14 @@ class NaverService:
             # 로그인 성공 확인
             if self._is_logged_in():
                 self.logger("로그인 성공")
-                self._get_blog_id()
                 return True
             else:
                 # 캡차나 2단계 인증 확인
                 if "캡차" in self.driver.page_source or "보안" in self.driver.page_source:
                     self.logger("보안 인증이 필요합니다. 브라우저에서 직접 완료해주세요.")
-                    # 사용자가 수동으로 인증할 시간 제공
                     input("인증 완료 후 Enter를 누르세요...")
                     if self._is_logged_in():
                         self.logger("로그인 성공")
-                        self._get_blog_id()
                         return True
 
                 raise NaverServiceError("로그인 실패: ID/PW를 확인해주세요")
@@ -199,14 +204,11 @@ class NaverService:
     def _is_logged_in(self) -> bool:
         """로그인 상태 확인"""
         try:
-            # 로그인 후 리다이렉트 또는 로그인 페이지 확인
             current_url = self.driver.current_url
 
-            # 로그인 페이지에 여전히 있으면 실패
             if "nidlogin" in current_url:
                 return False
 
-            # 쿠키로 확인
             cookies = self.driver.get_cookies()
             cookie_names = [c['name'] for c in cookies]
 
@@ -214,27 +216,6 @@ class NaverService:
 
         except Exception:
             return False
-
-    def _get_blog_id(self):
-        """블로그 ID 가져오기"""
-        try:
-            self.driver.get(self.BLOG_HOME_URL)
-            time.sleep(self.PAGE_LOAD_WAIT)
-
-            # URL에서 블로그 ID 추출
-            current_url = self.driver.current_url
-            if "/blog.naver.com/" in current_url:
-                parts = current_url.split("/")
-                for i, part in enumerate(parts):
-                    if "blog.naver.com" in part and i + 1 < len(parts):
-                        self.blog_id = parts[i + 1].split("?")[0]
-                        break
-
-            if self.blog_id:
-                self.logger(f"블로그 ID: {self.blog_id}")
-
-        except Exception as e:
-            self.logger(f"블로그 ID 가져오기 실패: {e}")
 
     def create_post(
         self,
@@ -264,12 +245,16 @@ class NaverService:
         self.logger("블로그 포스트 작성 중...")
 
         try:
-            # 글쓰기 페이지 접속
-            write_url = self.BLOG_WRITE_URL.format(blog_id=self.blog_id or "")
+            if not self.blog_id:
+                raise NaverServiceError("블로그 ID를 찾을 수 없습니다. 로그인 상태를 확인해주세요.")
+
+            # 글쓰기 페이지로 이동
+            write_url = self.BLOG_WRITE_URL.format(blog_id=self.blog_id)
+            self.logger(f"글쓰기 페이지 이동: {write_url}")
             self.driver.get(write_url)
             time.sleep(self.PAGE_LOAD_WAIT)
 
-            # SmartEditor iframe으로 전환
+            # 에디터 iframe으로 전환
             self._switch_to_editor()
 
             # 제목 입력
@@ -283,7 +268,12 @@ class NaverService:
             # 본문 입력
             self._input_content(content)
 
-            # 태그 입력
+            # iframe에서 나오기 (발행 버튼은 iframe 바깥에 있음)
+            self.driver.switch_to.default_content()
+            self.logger("iframe에서 나옴")
+            time.sleep(1)
+
+            # 태그 입력 (iframe 바깥)
             if tags:
                 self._input_tags(tags)
 
@@ -309,47 +299,76 @@ class NaverService:
         from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
 
-        try:
-            # mainFrame으로 전환
-            WebDriverWait(self.driver, self.DEFAULT_TIMEOUT).until(
-                EC.frame_to_be_available_and_switch_to_it((By.ID, "mainFrame"))
-            )
-            time.sleep(1)
-        except Exception:
-            # iframe이 없는 새 에디터인 경우 패스
-            pass
+        # 기본 프레임으로 초기화
+        self.driver.switch_to.default_content()
+        time.sleep(0.5)
+
+        # iframe 전환 시도
+        iframe_selectors = [
+            (By.ID, "mainFrame"),
+            (By.NAME, "mainFrame"),
+            (By.CSS_SELECTOR, "iframe#mainFrame"),
+            (By.CSS_SELECTOR, "iframe[name='mainFrame']"),
+        ]
+
+        for by, selector in iframe_selectors:
+            try:
+                WebDriverWait(self.driver, 5).until(
+                    EC.frame_to_be_available_and_switch_to_it((by, selector))
+                )
+                self.logger("에디터 iframe 전환 완료")
+                time.sleep(self.EDITOR_LOAD_WAIT)
+                return
+            except Exception:
+                continue
+
+        self.logger("iframe 없이 직접 에디터 접근")
 
     def _input_title(self, title: str):
         """제목 입력"""
         from selenium.webdriver.common.by import By
+        from selenium.webdriver.common.keys import Keys
         from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
 
         try:
-            # 제목 입력란 찾기 (여러 선택자 시도)
             selectors = [
-                (By.CSS_SELECTOR, ".se-title-text"),
-                (By.CSS_SELECTOR, "textarea.se-textarea"),
-                (By.CLASS_NAME, "se-ff-nanumgothic"),
-                (By.XPATH, "//span[@class='se-title-text']//span"),
+                (By.CSS_SELECTOR, "div.se-section-documentTitle p.se-text-paragraph"),
+                (By.CSS_SELECTOR, ".se-documentTitle .se-text-paragraph"),
+                (By.CSS_SELECTOR, "p.se-text-paragraph.se-text-paragraph-align-left"),
+                (By.XPATH, "//div[contains(@class, 'se-section-documentTitle')]//p"),
             ]
 
             title_elem = None
             for by, selector in selectors:
                 try:
                     title_elem = WebDriverWait(self.driver, 3).until(
-                        EC.element_to_be_clickable((by, selector))
+                        EC.presence_of_element_located((by, selector))
                     )
-                    break
+                    if title_elem and title_elem.is_displayed():
+                        self.logger(f"제목 입력란 발견: {selector}")
+                        break
+                    title_elem = None
                 except Exception:
                     continue
 
             if title_elem:
+                # 요소 클릭
                 title_elem.click()
                 time.sleep(0.3)
-                self._clipboard_paste(title_elem, title)
+
+                # Ctrl+A로 전체 선택
+                title_elem.send_keys(Keys.CONTROL, 'a')
+                time.sleep(0.1)
+
+                # 클립보드에 복사 후 붙여넣기
+                pyperclip.copy(title)
+                title_elem.send_keys(Keys.CONTROL, 'v')
+                time.sleep(0.3)
+
                 self.logger(f"제목 입력 완료: {title}")
             else:
+                self.logger("제목 입력란을 찾을 수 없습니다. 현재 URL: " + self.driver.current_url)
                 raise NaverServiceError("제목 입력란을 찾을 수 없습니다")
 
         except NaverServiceError:
@@ -360,33 +379,45 @@ class NaverService:
     def _input_content(self, content: str):
         """본문 입력"""
         from selenium.webdriver.common.by import By
+        from selenium.webdriver.common.keys import Keys
         from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
 
         try:
-            # 본문 영역 클릭
             selectors = [
-                (By.CSS_SELECTOR, ".se-content"),
-                (By.CSS_SELECTOR, ".se-component-content"),
-                (By.CLASS_NAME, "se-text-paragraph"),
+                (By.CSS_SELECTOR, "div[data-a11y-title='본문'] p.se-text-paragraph"),
+                (By.CSS_SELECTOR, "div.se-component.se-text p.se-text-paragraph"),
+                (By.CSS_SELECTOR, ".se-main-container p.se-text-paragraph"),
+                (By.XPATH, "//div[@data-a11y-title='본문']//p"),
             ]
 
             content_elem = None
             for by, selector in selectors:
                 try:
                     content_elem = WebDriverWait(self.driver, 3).until(
-                        EC.element_to_be_clickable((by, selector))
+                        EC.presence_of_element_located((by, selector))
                     )
-                    break
+                    if content_elem and content_elem.is_displayed():
+                        self.logger(f"본문 입력란 발견: {selector}")
+                        break
+                    content_elem = None
                 except Exception:
                     continue
 
             if content_elem:
+                # 요소 클릭
                 content_elem.click()
                 time.sleep(0.3)
 
-                # 내용 입력 (클립보드 방식)
-                self._clipboard_paste(content_elem, content)
+                # Ctrl+A로 전체 선택
+                content_elem.send_keys(Keys.CONTROL, 'a')
+                time.sleep(0.1)
+
+                # 클립보드에 복사 후 붙여넣기
+                pyperclip.copy(content)
+                content_elem.send_keys(Keys.CONTROL, 'v')
+                time.sleep(0.3)
+
                 self.logger("본문 입력 완료")
             else:
                 raise NaverServiceError("본문 입력란을 찾을 수 없습니다")
@@ -405,58 +436,72 @@ class NaverService:
             return
 
         try:
-            # 이미지 버튼 클릭
             img_btn = self.driver.find_element(
                 By.CSS_SELECTOR, "[data-name='image']"
             )
             img_btn.click()
             time.sleep(1)
 
-            # 파일 input 찾아서 업로드
             file_input = self.driver.find_element(
                 By.CSS_SELECTOR, "input[type='file']"
             )
             file_input.send_keys(os.path.abspath(image_path))
 
-            time.sleep(3)  # 업로드 대기
+            time.sleep(3)
             self.logger(f"이미지 업로드 완료: {image_path}")
 
         except Exception as e:
             self.logger(f"이미지 업로드 실패: {e}")
 
     def _input_tags(self, tags: List[str]):
-        """태그 입력"""
+        """태그 입력 (iframe 바깥에서 실행)"""
         from selenium.webdriver.common.by import By
         from selenium.webdriver.common.keys import Keys
+        from selenium.webdriver.support.ui import WebDriverWait
+        from selenium.webdriver.support import expected_conditions as EC
 
         try:
-            # 태그 입력란 찾기
-            tag_input = self.driver.find_element(
-                By.CSS_SELECTOR, ".post_tag input"
-            )
+            selectors = [
+                (By.CSS_SELECTOR, "input[placeholder*='태그']"),
+                (By.XPATH, "//input[contains(@placeholder, '태그')]"),
+            ]
 
-            for tag in tags[:10]:  # 최대 10개
-                tag_input.send_keys(tag)
-                tag_input.send_keys(Keys.ENTER)
-                time.sleep(0.2)
+            tag_input = None
+            for by, selector in selectors:
+                try:
+                    tag_input = WebDriverWait(self.driver, 3).until(
+                        EC.presence_of_element_located((by, selector))
+                    )
+                    if tag_input:
+                        self.logger(f"태그 입력란 발견: {selector}")
+                        break
+                except Exception:
+                    continue
 
-            self.logger(f"태그 입력 완료: {', '.join(tags)}")
+            if tag_input:
+                for tag in tags[:10]:
+                    tag_input.send_keys(tag)
+                    tag_input.send_keys(Keys.ENTER)
+                    time.sleep(0.2)
+
+                self.logger(f"태그 입력 완료: {', '.join(tags)}")
+            else:
+                self.logger("태그 입력란을 찾을 수 없습니다 (무시)")
 
         except Exception as e:
             self.logger(f"태그 입력 실패 (무시): {e}")
 
     def _publish_post(self) -> Optional[str]:
-        """포스트 발행"""
+        """포스트 발행 (iframe 바깥에서 실행)"""
         from selenium.webdriver.common.by import By
         from selenium.webdriver.support.ui import WebDriverWait
         from selenium.webdriver.support import expected_conditions as EC
 
         try:
-            # 발행 버튼 찾기
             selectors = [
-                (By.CSS_SELECTOR, ".publish_btn"),
+                (By.CSS_SELECTOR, "button[data-click-area='tpb.publish']"),
+                (By.CSS_SELECTOR, "button[class*='publish_btn']"),
                 (By.XPATH, "//button[contains(text(), '발행')]"),
-                (By.CSS_SELECTOR, "[data-name='publish']"),
             ]
 
             publish_btn = None
@@ -465,25 +510,37 @@ class NaverService:
                     publish_btn = WebDriverWait(self.driver, 3).until(
                         EC.element_to_be_clickable((by, selector))
                     )
-                    break
+                    if publish_btn:
+                        self.logger(f"발행 버튼 발견: {selector}")
+                        break
                 except Exception:
                     continue
 
             if publish_btn:
                 publish_btn.click()
+                self.logger("발행 버튼 클릭")
                 time.sleep(2)
 
-                # 확인 버튼이 있으면 클릭
-                try:
-                    confirm_btn = self.driver.find_element(
-                        By.CSS_SELECTOR, ".confirm_btn"
-                    )
-                    confirm_btn.click()
-                    time.sleep(2)
-                except Exception:
-                    pass
+                # 발행 확인 팝업 처리
+                confirm_selectors = [
+                    (By.CSS_SELECTOR, "button[data-click-area='pup.confirm']"),
+                    (By.XPATH, "//button[contains(text(), '확인')]"),
+                ]
 
-                # 발행 후 URL 반환
+                for by, selector in confirm_selectors:
+                    try:
+                        confirm_btn = WebDriverWait(self.driver, 3).until(
+                            EC.element_to_be_clickable((by, selector))
+                        )
+                        if confirm_btn:
+                            confirm_btn.click()
+                            self.logger("발행 확인 버튼 클릭")
+                            time.sleep(2)
+                            break
+                    except Exception:
+                        continue
+
+                time.sleep(2)
                 return self.driver.current_url
 
             raise NaverServiceError("발행 버튼을 찾을 수 없습니다")
@@ -495,7 +552,6 @@ class NaverService:
 
     def get_recent_posts(self, count: int = 10) -> List[dict]:
         """최근 포스트 목록 가져오기"""
-        # TODO: 구현
         return []
 
     def close(self):
@@ -524,7 +580,6 @@ if __name__ == "__main__":
     print("=== NaverService 모듈 테스트 ===\n")
     print("주의: 이 테스트는 실제 네이버 로그인을 시도합니다.\n")
 
-    # 테스트 모드 선택
     print("테스트 옵션:")
     print("1. 브라우저 초기화만 테스트")
     print("2. 로그인 테스트 (ID/PW 필요)")
@@ -571,9 +626,7 @@ if __name__ == "__main__":
         else:
             try:
                 with NaverService(headless=False) as service:
-                    # 로그인
                     if service.login(naver_id, naver_pw):
-                        # 테스트 포스팅
                         result = service.create_post(
                             title="[테스트] 자동 포스팅 테스트",
                             content="이 글은 NaverBlogPoster 테스트로 작성되었습니다.\n\n삭제해주세요.",
