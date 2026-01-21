@@ -80,12 +80,11 @@ class GeminiService:
 
             # API 호출 없이 하드코딩된 모델 목록 사용 (RPM 절약)
             self._available_models = [
-                "models/gemini-2.5-flash-preview-05-20",
-                "models/gemini-2.0-flash",
-                "models/gemini-1.5-flash",
-                "models/gemini-1.5-pro",
+                "models/gemini-2.5-flash-lite",  # 가장 저렴
+                "models/gemini-2.5-flash",       # 가성비 최고
+                "models/gemini-2.0-flash",       # 백업
             ]
-            self._working_model = "models/gemini-2.5-flash-preview-05-20"  # 기본 모델 설정
+            self._working_model = "models/gemini-2.5-flash-lite"  # 기본 모델 설정
 
         except ImportError:
             raise GeminiServiceError(
@@ -122,9 +121,9 @@ class GeminiService:
             self.logger(f"모델 목록 조회 실패: {e}")
             # 실패 시 기본 모델 목록 사용
             self._available_models = [
-                "models/gemini-1.5-flash",
-                "models/gemini-1.5-pro",
-                "models/gemini-pro",
+                "models/gemini-2.5-flash-lite",
+                "models/gemini-2.5-flash",
+                "models/gemini-2.0-flash",
             ]
 
     def _rate_limit(self):
