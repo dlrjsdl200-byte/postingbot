@@ -8,10 +8,12 @@ from .error_dialog import (
     show_error_dialog,
     classify_gemini_error
 )
+from .quota_dialog import QuotaDialog
 
 __all__ = [
     'ErrorDialog',
     'ErrorType',
     'show_error_dialog',
-    'classify_gemini_error'
+    'classify_gemini_error',
+    'QuotaDialog'
 ]

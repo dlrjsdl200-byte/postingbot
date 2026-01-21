@@ -86,6 +86,7 @@ class PostingEngine:
         keywords: str = "",
         use_image: bool = True,
         use_emoji: bool = True,
+        image_prompt: str = "",
         headless: bool = False,
         logger: Optional[Callable] = None,
         progress_callback: Optional[Callable[[PostingProgress], None]] = None,
@@ -101,6 +102,7 @@ class PostingEngine:
             keywords: 세부 키워드 (쉼표 구분)
             use_image: 이미지 자동 생성 여부
             use_emoji: 이모지 사용 여부
+            image_prompt: 고정 이미지 프롬프트 (비어있으면 자동 생성)
             headless: 브라우저 숨김 모드
             logger: 로그 출력 함수
             progress_callback: 진행 상황 콜백
@@ -114,6 +116,7 @@ class PostingEngine:
         self.keywords = [k.strip() for k in keywords.split(',') if k.strip()]
         self.use_image = use_image
         self.use_emoji = use_emoji
+        self.image_prompt = image_prompt.strip()
         self.headless = headless
         self.logger = logger or print
         self.progress_callback = progress_callback
@@ -217,7 +220,11 @@ class PostingEngine:
                     "이미지 생성 중... (Pollinations AI)"
                 )
                 self._check_stop()
-                image_path = self._generate_image(topic, content_result.image_prompt)
+                # 고정 프롬프트가 있으면 사용, 없으면 자동 생성된 프롬프트 사용
+                final_image_prompt = self.image_prompt if self.image_prompt else content_result.image_prompt
+                if self.image_prompt:
+                    self.logger(f"고정 이미지 프롬프트 사용: {self.image_prompt[:50]}...")
+                image_path = self._generate_image(topic, final_image_prompt)
                 self._update_progress(
                     PostingStatus.GENERATING_IMAGE, 4,
                     "이미지 생성 완료",
@@ -333,7 +340,11 @@ class PostingEngine:
     def _generate_content(self, topic: str):
         """콘텐츠 생성"""
         from agents.content_agent import ContentAgent, ContentAgentError
-        from services.gemini_service import GeminiServiceError, GeminiErrorType
+        from services.gemini_service import GeminiService, GeminiServiceError, GeminiErrorType
+
+        # 모델 사전 테스트 건너뛰기 (RPM 절약)
+        # 실제 콘텐츠 생성 시 자동으로 모델 선택됨
+        self.logger("Gemini API 준비 중...")
 
         if self._content_agent is None:
             self._content_agent = ContentAgent(

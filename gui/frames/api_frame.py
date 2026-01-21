@@ -19,7 +19,7 @@ class ApiFrame(ctk.CTkFrame):
         """UI 구성"""
         # 헤더
         header_frame = ctk.CTkFrame(self, fg_color="transparent")
-        header_frame.pack(fill="x", padx=15, pady=(10, 5))
+        header_frame.pack(fill="x", padx=10, pady=(5, 2))
 
         header = ctk.CTkLabel(
             header_frame,
@@ -45,18 +45,31 @@ class ApiFrame(ctk.CTkFrame):
         help_btn = ctk.CTkButton(
             header_frame,
             text="API 키 발급",
-            width=90,
+            width=80,
             height=25,
             font=ctk.CTkFont(size=11),
             command=self._open_api_guide
         )
         help_btn.pack(side="right")
 
+        # 할당량 확인 버튼
+        self.quota_btn = ctk.CTkButton(
+            header_frame,
+            text="할당량",
+            width=60,
+            height=25,
+            font=ctk.CTkFont(size=11),
+            fg_color="#6c757d",
+            hover_color="#5a6268",
+            command=self._show_quota_dialog
+        )
+        self.quota_btn.pack(side="right", padx=(0, 5))
+
         # API Key 입력
         key_frame = ctk.CTkFrame(self, fg_color="transparent")
-        key_frame.pack(fill="x", padx=15, pady=(5, 10))
+        key_frame.pack(fill="x", padx=10, pady=(2, 5))
 
-        key_label = ctk.CTkLabel(key_frame, text="API Key:", width=100, anchor="w")
+        key_label = ctk.CTkLabel(key_frame, text="API Key:", width=120, anchor="w")
         key_label.pack(side="left")
 
         self.api_entry = ctk.CTkEntry(
@@ -69,6 +82,16 @@ class ApiFrame(ctk.CTkFrame):
     def _open_api_guide(self):
         """API 키 발급 가이드 페이지 열기"""
         webbrowser.open("https://aistudio.google.com/apikey")
+
+    def _show_quota_dialog(self):
+        """할당량 확인 다이얼로그 표시"""
+        api_key = self.get_api_key()
+        if not api_key:
+            self.app.logger.log("API 키를 먼저 입력해주세요.", "warning")
+            return
+
+        from gui.dialogs.quota_dialog import QuotaDialog
+        QuotaDialog(self.app, api_key, self.app.logger.log)
 
     def get_api_key(self) -> str:
         """API Key 반환"""

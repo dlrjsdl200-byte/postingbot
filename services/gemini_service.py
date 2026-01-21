@@ -409,6 +409,14 @@ class GeminiService:
 [카테고리] {category}
 [키워드] {keywords_str}
 
+[레이아웃 규칙 - 매우 중요!]
+1. 한 줄 길이: 15~22자 (한글 기준)
+2. 한 문장 최대: 55자 이내
+3. 문단 사이 빈 줄: 2줄
+4. 소제목/소블록 사이 빈 줄: 1줄
+5. 글 시작: 흥미로운 질문이나 공감 문장으로 시작
+6. 각 문단은 짧은 줄들로 구성 (모바일 가독성)
+
 [작성 조건]
 1. {emoji_instruction} 친근하고 읽기 쉬운 문체로 작성
 2. 글 길이: {min_length}~{max_length}자
@@ -418,10 +426,34 @@ class GeminiService:
 6. 독자가 공감할 수 있는 경험담이나 예시 포함
 7. 마지막에 독자 참여를 유도하는 질문 추가
 
-[출력 형식]
-제목: (흥미로운 제목)
+[글 구조 예시]
+혹시 여러분도
+이런 경험 있으신가요?
 
-(본문 내용)
+저도 처음에는
+정말 막막했어요.
+
+
+## 첫 번째 소제목
+
+짧은 문장으로 시작합니다.
+핵심 내용을 전달해요.
+
+부가 설명이 이어집니다.
+독자가 쉽게 이해할 수 있도록요.
+
+
+## 두 번째 소제목
+
+...
+
+[출력 형식 - 반드시 이 형식을 따르세요!]
+첫 줄은 반드시 "제목: " 으로 시작하고, 그 뒤에 클릭을 유도하는 매력적인 제목을 작성하세요.
+예시: 제목: 직장인 필수! 파이썬으로 반복 업무 10분만에 끝내는 법
+
+제목: (여기에 흥미롭고 클릭을 유도하는 제목 작성)
+
+(본문 내용 - 위 레이아웃 규칙 준수)
 
 태그: (쉼표로 구분된 5-7개 태그)
 """
@@ -432,32 +464,115 @@ class GeminiService:
         # 응답 파싱
         return self._parse_blog_response(response, topic)
 
+    def _clean_markdown(self, text: str) -> str:
+        """마크다운 및 HTML 태그 제거"""
+        # HTML 태그 제거 (<h1>, <h2>, <p>, <br>, <strong>, <em> 등)
+        # 태그 내용은 유지하고 태그만 제거
+        text = re.sub(r'<(h[1-6]|p|div|span|strong|em|b|i|u|a|br|hr)[^>]*>', '', text, flags=re.IGNORECASE)
+        text = re.sub(r'</(h[1-6]|p|div|span|strong|em|b|i|u|a)>', '', text, flags=re.IGNORECASE)
+
+        # 셀프 클로징 태그 제거 (<br/>, <hr/>)
+        text = re.sub(r'<(br|hr)\s*/?\s*>', '', text, flags=re.IGNORECASE)
+
+        # 기타 HTML 태그 제거 (남은 것들)
+        text = re.sub(r'<[^>]+>', '', text)
+
+        # ## 헤더 -> 텍스트만 (줄 시작의 # 제거)
+        text = re.sub(r'^#{1,6}\s*', '', text, flags=re.MULTILINE)
+
+        # **bold** -> bold
+        text = re.sub(r'\*\*([^*]+)\*\*', r'\1', text)
+
+        # *italic* -> italic (단어 단위)
+        text = re.sub(r'\*([^*\s][^*]*[^*\s])\*', r'\1', text)
+        text = re.sub(r'\*([^*\s])\*', r'\1', text)
+
+        # __bold__ -> bold
+        text = re.sub(r'__([^_]+)__', r'\1', text)
+
+        # _italic_ -> italic
+        text = re.sub(r'_([^_\s][^_]*[^_\s])_', r'\1', text)
+        text = re.sub(r'_([^_\s])_', r'\1', text)
+
+        # ~~strikethrough~~ -> strikethrough
+        text = re.sub(r'~~([^~]+)~~', r'\1', text)
+
+        # `code` -> code
+        text = re.sub(r'`([^`]+)`', r'\1', text)
+
+        # [link text](url) -> link text
+        text = re.sub(r'\[([^\]]+)\]\([^)]+\)', r'\1', text)
+
+        # - 또는 * 로 시작하는 리스트 아이템 -> 그냥 텍스트
+        text = re.sub(r'^[\-\*]\s+', '', text, flags=re.MULTILINE)
+
+        # 숫자. 로 시작하는 리스트 -> 그냥 텍스트
+        text = re.sub(r'^\d+\.\s+', '', text, flags=re.MULTILINE)
+
+        # > 인용문 제거
+        text = re.sub(r'^>\s*', '', text, flags=re.MULTILINE)
+
+        # --- 또는 *** 구분선 제거
+        text = re.sub(r'^[\-\*]{3,}\s*$', '', text, flags=re.MULTILINE)
+
+        # 연속된 빈 줄 정리 (3줄 이상 -> 2줄)
+        text = re.sub(r'\n{3,}', '\n\n', text)
+
+        return text.strip()
+
     def _parse_blog_response(self, response: str, default_topic: str) -> BlogContent:
         """블로그 응답 파싱"""
         lines = response.strip().split('\n')
 
-        title = default_topic
+        title = None  # 기본값을 None으로 변경하여 제목 추출 여부 확인
         content_lines = []
         tags = []
         in_content = False
+        title_found = False
 
         for line in lines:
             line_stripped = line.strip()
 
-            if line_stripped.startswith('제목:'):
-                title = line_stripped[3:].strip()
-            elif line_stripped.startswith('태그:'):
-                tags_str = line_stripped[3:].strip()
+            # 제목 추출 (다양한 형식 지원)
+            if not title_found:
+                # "제목: xxx" 또는 "제목 : xxx" 형식
+                if line_stripped.startswith('제목:') or line_stripped.startswith('제목 :'):
+                    title = line_stripped.split(':', 1)[1].strip()
+                    title_found = True
+                    continue
+                # "**제목: xxx**" 형식
+                elif '제목:' in line_stripped or '제목 :' in line_stripped:
+                    match = re.search(r'제목\s*:\s*(.+)', line_stripped)
+                    if match:
+                        title = match.group(1).strip()
+                        title_found = True
+                        continue
+
+            # 태그 추출
+            if line_stripped.startswith('태그:') or line_stripped.startswith('태그 :'):
+                tags_str = line_stripped.split(':', 1)[1].strip()
                 tags = [t.strip().replace('#', '') for t in tags_str.split(',')]
             elif line_stripped == '':
                 if in_content:
                     content_lines.append('')
             else:
-                if not line_stripped.startswith('제목:'):
+                # 제목/태그 줄이 아니면 본문으로 처리
+                if not (line_stripped.startswith('제목') and ':' in line_stripped):
                     in_content = True
                     content_lines.append(line)
 
         content = '\n'.join(content_lines).strip()
+
+        # 마크다운 문법 제거
+        content = self._clean_markdown(content)
+
+        # 제목이 추출되지 않았으면 기본 주제 사용
+        if not title:
+            title = default_topic
+            self.logger(f"제목 추출 실패, 기본값 사용: {title}")
+        else:
+            title = self._clean_markdown(title)
+            self.logger(f"제목 추출 성공: {title}")
 
         # 태그가 없으면 기본 태그 생성
         if not tags:

@@ -37,13 +37,13 @@ class TopicFrame(ctk.CTkFrame):
             font=ctk.CTkFont(size=14, weight="bold"),
             anchor="w"
         )
-        header.pack(fill="x", padx=15, pady=(10, 5))
+        header.pack(fill="x", padx=10, pady=(5, 2))
 
         # 카테고리 선택
         cat_frame = ctk.CTkFrame(self, fg_color="transparent")
-        cat_frame.pack(fill="x", padx=15, pady=5)
+        cat_frame.pack(fill="x", padx=10, pady=2)
 
-        cat_label = ctk.CTkLabel(cat_frame, text="주제 카테고리:", width=100, anchor="w")
+        cat_label = ctk.CTkLabel(cat_frame, text="주제 카테고리:", width=120, anchor="w")
         cat_label.pack(side="left")
 
         self.category_var = ctk.StringVar(value="직접입력")
@@ -57,9 +57,9 @@ class TopicFrame(ctk.CTkFrame):
 
         # 키워드 입력
         kw_frame = ctk.CTkFrame(self, fg_color="transparent")
-        kw_frame.pack(fill="x", padx=15, pady=5)
+        kw_frame.pack(fill="x", padx=10, pady=2)
 
-        kw_label = ctk.CTkLabel(kw_frame, text="세부 키워드:", width=100, anchor="w")
+        kw_label = ctk.CTkLabel(kw_frame, text="세부 키워드:", width=120, anchor="w")
         kw_label.pack(side="left")
 
         self.keyword_entry = ctk.CTkEntry(
@@ -70,9 +70,9 @@ class TopicFrame(ctk.CTkFrame):
 
         # 참고 URL 입력
         url_frame = ctk.CTkFrame(self, fg_color="transparent")
-        url_frame.pack(fill="x", padx=15, pady=5)
+        url_frame.pack(fill="x", padx=10, pady=2)
 
-        url_label = ctk.CTkLabel(url_frame, text="참고 URL:", width=100, anchor="w")
+        url_label = ctk.CTkLabel(url_frame, text="참고 URL:", width=120, anchor="w")
         url_label.pack(side="left")
 
         self.url_entry = ctk.CTkEntry(
@@ -93,15 +93,15 @@ class TopicFrame(ctk.CTkFrame):
         self.url_status = ctk.CTkLabel(
             self,
             text="",
-            font=ctk.CTkFont(size=11),
+            font=ctk.CTkFont(size=10),
             text_color="gray",
             anchor="w"
         )
-        self.url_status.pack(fill="x", padx=15, pady=(0, 5))
+        self.url_status.pack(fill="x", padx=10, pady=(0, 2))
 
         # 옵션 체크박스
         opt_frame = ctk.CTkFrame(self, fg_color="transparent")
-        opt_frame.pack(fill="x", padx=15, pady=(5, 10))
+        opt_frame.pack(fill="x", padx=10, pady=(2, 5))
 
         self.use_image_var = ctk.BooleanVar(value=True)
         self.image_checkbox = ctk.CTkCheckBox(
@@ -118,6 +118,24 @@ class TopicFrame(ctk.CTkFrame):
             variable=self.use_emoji_var
         )
         self.emoji_checkbox.pack(side="left")
+
+        # 이미지 프롬프트 입력 (고정 프롬프트)
+        img_prompt_frame = ctk.CTkFrame(self, fg_color="transparent")
+        img_prompt_frame.pack(fill="x", padx=10, pady=2)
+
+        img_prompt_label = ctk.CTkLabel(
+            img_prompt_frame,
+            text="이미지 프롬프트:",
+            width=120,
+            anchor="w"
+        )
+        img_prompt_label.pack(side="left")
+
+        self.image_prompt_entry = ctk.CTkEntry(
+            img_prompt_frame,
+            placeholder_text="고정 이미지 프롬프트 (비워두면 자동 생성)"
+        )
+        self.image_prompt_entry.pack(side="left", fill="x", expand=True)
 
         # 크롤링 결과 저장
         self._crawl_result = None
@@ -138,7 +156,12 @@ class TopicFrame(ctk.CTkFrame):
         """이모지 사용 여부 반환"""
         return self.use_emoji_var.get()
 
-    def set_values(self, category: str, keywords: str, use_image: bool, use_emoji: bool):
+    def get_image_prompt(self) -> str:
+        """고정 이미지 프롬프트 반환"""
+        return self.image_prompt_entry.get().strip()
+
+    def set_values(self, category: str, keywords: str, use_image: bool, use_emoji: bool,
+                   image_prompt: str = ""):
         """값 설정"""
         if category in self.CATEGORIES:
             self.category_var.set(category)
@@ -146,6 +169,9 @@ class TopicFrame(ctk.CTkFrame):
         self.keyword_entry.insert(0, keywords)
         self.use_image_var.set(use_image)
         self.use_emoji_var.set(use_emoji)
+        self.image_prompt_entry.delete(0, "end")
+        if image_prompt:
+            self.image_prompt_entry.insert(0, image_prompt)
 
     def get_reference_url(self) -> str:
         """참고 URL 반환"""

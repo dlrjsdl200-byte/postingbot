@@ -19,8 +19,8 @@ class NaverBlogPosterApp(ctk.CTk):
 
         # 앱 설정
         self.title("NaverBlogPoster - 네이버 블로그 자동 포스팅")
-        self.geometry("700x800")
-        self.minsize(600, 700)
+        self.geometry("650x700")
+        self.minsize(550, 600)
 
         # 테마 설정
         ctk.set_appearance_mode("dark")
@@ -47,39 +47,39 @@ class NaverBlogPosterApp(ctk.CTk):
         """UI 구성"""
         # 메인 컨테이너
         self.main_container = ctk.CTkScrollableFrame(self)
-        self.main_container.pack(fill="both", expand=True, padx=10, pady=10)
+        self.main_container.pack(fill="both", expand=True, padx=5, pady=5)
 
         # 타이틀
         title_label = ctk.CTkLabel(
             self.main_container,
             text="NaverBlogPoster",
-            font=ctk.CTkFont(size=24, weight="bold")
+            font=ctk.CTkFont(size=20, weight="bold")
         )
-        title_label.pack(pady=(0, 5))
+        title_label.pack(pady=(0, 2))
 
         subtitle_label = ctk.CTkLabel(
             self.main_container,
             text="네이버 블로그 자동 포스팅 도구",
-            font=ctk.CTkFont(size=12),
+            font=ctk.CTkFont(size=11),
             text_color="gray"
         )
-        subtitle_label.pack(pady=(0, 15))
+        subtitle_label.pack(pady=(0, 8))
 
         # 프레임들 생성
         self.login_frame = LoginFrame(self.main_container, self)
-        self.login_frame.pack(fill="x", pady=(0, 10))
+        self.login_frame.pack(fill="x", pady=(0, 5))
 
         self.api_frame = ApiFrame(self.main_container, self)
-        self.api_frame.pack(fill="x", pady=(0, 10))
+        self.api_frame.pack(fill="x", pady=(0, 5))
 
         self.topic_frame = TopicFrame(self.main_container, self)
-        self.topic_frame.pack(fill="x", pady=(0, 10))
+        self.topic_frame.pack(fill="x", pady=(0, 5))
 
         self.action_frame = ActionFrame(self.main_container, self)
-        self.action_frame.pack(fill="x", pady=(0, 10))
+        self.action_frame.pack(fill="x", pady=(0, 5))
 
         self.log_frame = LogFrame(self.main_container, self)
-        self.log_frame.pack(fill="both", expand=True, pady=(0, 10))
+        self.log_frame.pack(fill="both", expand=True, pady=(0, 5))
 
         # 상태바
         self.status_bar = ctk.CTkLabel(
@@ -105,7 +105,8 @@ class NaverBlogPosterApp(ctk.CTk):
                 config.get('category', '직접입력'),
                 config.get('keywords', ''),
                 config.get('use_image', True),
-                config.get('use_emoji', True)
+                config.get('use_emoji', True),
+                config.get('image_prompt', '')
             )
             # 자동저장 설정 불러오기
             self.login_frame.set_auto_save(config.get('auto_save_credentials', True))
@@ -125,6 +126,7 @@ class NaverBlogPosterApp(ctk.CTk):
             'keywords': self.topic_frame.get_keywords(),
             'use_image': self.topic_frame.get_use_image(),
             'use_emoji': self.topic_frame.get_use_emoji(),
+            'image_prompt': self.topic_frame.get_image_prompt(),
             'auto_save_credentials': self.login_frame.get_auto_save(),
             'auto_save_api_key': self.api_frame.get_auto_save()
         }
@@ -155,6 +157,7 @@ class NaverBlogPosterApp(ctk.CTk):
             'keywords': self.topic_frame.get_keywords(),
             'use_image': self.topic_frame.get_use_image(),
             'use_emoji': self.topic_frame.get_use_emoji(),
+            'image_prompt': self.topic_frame.get_image_prompt(),
             'auto_save_credentials': self.login_frame.get_auto_save(),
             'auto_save_api_key': self.api_frame.get_auto_save()
         }
@@ -213,6 +216,7 @@ class NaverBlogPosterApp(ctk.CTk):
                 keywords=self.topic_frame.get_keywords(),
                 use_image=self.topic_frame.get_use_image(),
                 use_emoji=self.topic_frame.get_use_emoji(),
+                image_prompt=self.topic_frame.get_image_prompt(),
                 logger=self.logger,
                 reference_content=reference_content,
                 reference_title=reference_title

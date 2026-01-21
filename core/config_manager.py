@@ -45,6 +45,9 @@ class AppConfig:
     use_image: bool = True
     use_emoji: bool = True
 
+    # 이미지 설정
+    image_prompt: str = ""  # 고정 이미지 프롬프트 (비어있으면 자동 생성)
+
     # 고급 설정
     post_delay: int = 5  # 포스팅 간 대기 시간 (초)
     max_retries: int = 3  # 재시도 횟수

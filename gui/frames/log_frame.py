@@ -19,7 +19,7 @@ class LogFrame(ctk.CTkFrame):
         """UI 구성"""
         # 헤더
         header_frame = ctk.CTkFrame(self, fg_color="transparent")
-        header_frame.pack(fill="x", padx=15, pady=(10, 5))
+        header_frame.pack(fill="x", padx=10, pady=(5, 2))
 
         header = ctk.CTkLabel(
             header_frame,
@@ -42,10 +42,10 @@ class LogFrame(ctk.CTkFrame):
         # 로그 텍스트박스
         self.log_textbox = ctk.CTkTextbox(
             self,
-            height=200,
+            height=250,
             font=ctk.CTkFont(family="Consolas", size=11)
         )
-        self.log_textbox.pack(fill="both", expand=True, padx=15, pady=(5, 10))
+        self.log_textbox.pack(fill="both", expand=True, padx=10, pady=(2, 5))
         self.log_textbox.configure(state="disabled")
 
     def add_log(self, message: str, level: str = "info"):

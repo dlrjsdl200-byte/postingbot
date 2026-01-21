@@ -19,7 +19,7 @@ class LoginFrame(ctk.CTkFrame):
         """UI 구성"""
         # 헤더
         header_frame = ctk.CTkFrame(self, fg_color="transparent")
-        header_frame.pack(fill="x", padx=15, pady=(10, 5))
+        header_frame.pack(fill="x", padx=10, pady=(5, 2))
 
         header = ctk.CTkLabel(
             header_frame,
@@ -44,9 +44,9 @@ class LoginFrame(ctk.CTkFrame):
 
         # ID 입력
         id_frame = ctk.CTkFrame(self, fg_color="transparent")
-        id_frame.pack(fill="x", padx=15, pady=5)
+        id_frame.pack(fill="x", padx=10, pady=2)
 
-        id_label = ctk.CTkLabel(id_frame, text="네이버 ID:", width=100, anchor="w")
+        id_label = ctk.CTkLabel(id_frame, text="네이버 ID:", width=120, anchor="w")
         id_label.pack(side="left")
 
         self.id_entry = ctk.CTkEntry(id_frame, placeholder_text="아이디 입력")
@@ -54,9 +54,9 @@ class LoginFrame(ctk.CTkFrame):
 
         # PW 입력
         pw_frame = ctk.CTkFrame(self, fg_color="transparent")
-        pw_frame.pack(fill="x", padx=15, pady=(5, 10))
+        pw_frame.pack(fill="x", padx=10, pady=(2, 5))
 
-        pw_label = ctk.CTkLabel(pw_frame, text="비밀번호:", width=100, anchor="w")
+        pw_label = ctk.CTkLabel(pw_frame, text="비밀번호:", width=120, anchor="w")
         pw_label.pack(side="left")
 
         self.pw_entry = ctk.CTkEntry(pw_frame, placeholder_text="비밀번호 입력", show="●")
